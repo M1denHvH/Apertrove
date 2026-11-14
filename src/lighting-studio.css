@@ -1,0 +1,50 @@
+.lighting-studio { max-width: 1230px; }
+.lighting-sections { width: fit-content; max-width: 100%; flex-wrap: wrap; }
+.lighting-sections button { min-height: 33px; font-weight: 700; }
+.lighting-sections button[aria-pressed=true] { background: var(--surface); color: var(--text); }
+.lighting-notice { min-height: 20px; margin: 4px 0; font-size: 11px; color: var(--text-secondary); }
+.lighting-layout { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 16px; align-items: start; }
+.lighting-panel { min-width: 0; background: var(--surface); border: 1px solid var(--border); border-radius: var(--ui-radius); padding: 20px; }
+.lighting-panel h2 { font-size: 16px; margin: 0 0 16px; }
+.lighting-panel h3 { font-size: 13px; margin: 18px 0 8px; }
+.lighting-panel p, .lighting-panel li { font-size: 12px; line-height: 1.7; color: var(--text-secondary); overflow-wrap: anywhere; }
+.lighting-panel li + li { margin-top: 8px; }
+.lighting-panel ol { margin: 0; padding-left: 20px; }
+.lighting-wheel-area { display: grid; grid-template-columns: minmax(0, 1fr) minmax(110px, .8fr); align-items: center; gap: 18px; margin: 16px 0; }
+.lighting-wheel { width: min(100%, 252px); aspect-ratio: 1; position: relative; border-radius: 50%; touch-action: none; cursor: crosshair; background: radial-gradient(circle closest-side, #fff, transparent), conic-gradient(red, yellow, lime, cyan, blue, magenta, red); }
+.lighting-wheel span { width: 12px; height: 12px; border: 2px solid #fff; border-radius: 50%; position: absolute; translate: -50% -50%; box-shadow: 0 1px 3px #0009; pointer-events: none; }
+.lighting-wheel .base-marker { width: 18px; height: 18px; z-index: 1; }
+.lighting-sliders { display: grid; gap: 12px; }
+.lighting-sliders label, .lighting-hex { display: grid; gap: 6px; font-size: 11px; color: var(--text-secondary); }
+.lighting-sliders label > span { display: flex; justify-content: space-between; gap: 4px; }
+.lighting-sliders input { width: 100%; accent-color: var(--accent-color); }
+.lighting-hex { max-width: 165px; }
+.lighting-hex input { width: 100%; padding: 8px 10px; border: 1px solid var(--border); border-radius: var(--ui-radius); font-variant-numeric: tabular-nums; }
+.lighting-panel .lighting-error { color: var(--error-text); }
+.lighting-swatches { display: grid; gap: 6px; margin: 14px 0; }
+.lighting-swatches button { min-width: 0; display: grid; grid-template-columns: 54px minmax(0,1fr) 18px; align-items: center; gap: 10px; padding: 5px 10px 5px 5px; text-align: left; border: 1px solid var(--border); border-radius: var(--ui-radius); background: var(--surface-soft); color: var(--text); }
+.lighting-swatches button:hover { background: var(--surface-hover); }
+.lighting-swatch { height: 33px; border: 1px solid var(--border); border-radius: max(2px, calc(var(--ui-radius) - 4px)); }
+.lighting-swatch-info { display: flex; align-items: baseline; justify-content: space-between; flex-wrap: wrap; column-gap: 8px; font-size: 11px; }
+.lighting-swatch-info strong { font-variant-numeric: tabular-nums; }
+.lighting-favorites { margin-top: 16px; }
+.lighting-favorites ul { display: flex; flex-wrap: wrap; gap: 8px 12px; list-style: none; margin: 0; padding: 0; }
+.lighting-favorites li, .lighting-fixtures, .lighting-presets { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; }
+.lighting-favorites li + li { margin-top: 0; }
+.lighting-favorites li .btn { white-space: normal; text-align: left; }
+.lighting-dot { width: 12px; height: 12px; flex: 0 0 12px; border-radius: 50%; border: 1px solid var(--border); }
+.lighting-diagram svg { width: 100%; display: block; max-height: 330px; background: var(--surface-soft); border: 1px solid var(--border); border-radius: var(--ui-radius); margin: 14px 0 10px; }
+.lighting-diagram text { fill: var(--text); font-size: 13px; text-anchor: middle; font-weight: 700; }
+.lighting-backdrop-line, .lighting-direction { fill: none; stroke: var(--text-secondary); stroke-width: 2; }
+.lighting-axis, .lighting-beam { stroke: var(--text-muted); stroke-dasharray: 4 5; stroke-width: 1.5; }
+.lighting-beam.selected { stroke: var(--accent-ink); stroke-width: 2; }
+.lighting-subject, .lighting-node circle { fill: var(--surface); stroke: var(--text-secondary); stroke-width: 1.5; }
+.lighting-node { cursor: pointer; }
+.lighting-node.selected circle { fill: var(--accent-color); stroke: var(--accent-ink); }
+.lighting-node.selected text { fill: var(--on-accent); }
+.lighting-fixtures button span { font-variant-numeric: tabular-nums; }
+.lighting-fixture-detail { padding: 13px; border-radius: var(--ui-radius); background: var(--surface-soft); }
+.lighting-fixture-detail > span { display: block; margin-top: 4px; font-size: 11px; color: var(--text-secondary); }
+.lighting-fixture-detail > p { margin-bottom: 0; }
+.lighting-studio > .lighting-presets { margin-bottom: 12px; }
+@media (max-width: 850px) { .lighting-layout { grid-template-columns: minmax(0, 1fr); } }

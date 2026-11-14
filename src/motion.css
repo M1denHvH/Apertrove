@@ -1,0 +1,53 @@
+:root {
+  --motion-fast: 130ms;
+  --motion-standard: 210ms;
+  --motion-panel: 260ms;
+  --motion-hero: 540ms;
+  --motion-ease: cubic-bezier(.2, .8, .2, 1);
+  --ui-ease: var(--motion-ease);
+}
+:root[data-design=classic] { --motion-standard: 185ms; --motion-panel: 225ms; }
+:root[data-design=modern] { --motion-standard: 235ms; --motion-panel: 285ms; }
+:root[data-performance-mode] {
+  --motion-fast: 80ms;
+  --motion-standard: 100ms;
+  --motion-panel: 100ms;
+  --motion-hero: 100ms;
+}
+:root[data-performance-mode] :is(.modal-backdrop,.viewer-backdrop,.viewer-bottom,.canvas-chip,.photo-delete-button) { backdrop-filter: none; }
+:root[data-performance-mode] :is(.modal,.viewer,.toast,.capability-camera,.tutorial-coach,.ui-select-menu,.library-photo-card) { box-shadow: none; }
+:root[data-performance-mode] :is(.shot-meta,.shot-meta-section,.shot-stage > img[data-loaded],.lighting-diagram svg,.library-photo-card[data-arriving]) { animation: none; }
+:root[data-performance-mode] :is(.photo-card-image,.session-cover):hover > img { scale: 1; transform: none; }
+
+@media (prefers-reduced-motion: no-preference) {
+  :is(.btn, .icon-btn, .nav-item, .connection-badge, .ui-select, .film-thumb, .toggle) {
+    transition: background-color var(--motion-fast) var(--motion-ease), border-color var(--motion-fast) var(--motion-ease),
+      color var(--motion-fast) var(--motion-ease), opacity var(--motion-fast), translate var(--motion-fast) var(--motion-ease);
+  }
+  :is(.btn,.icon-btn,.connection-badge):active:not(:disabled) { translate: 0 1px; }
+  .nav-item > svg { transition: translate var(--motion-fast) var(--motion-ease); }
+  .nav-item:hover > svg { translate: 0 -1px; }
+  .nav-item.active i { animation: motion-reveal var(--motion-standard) var(--motion-ease); }
+  .toggle span { transition: transform var(--motion-standard) var(--motion-ease), background-color var(--motion-fast); }
+  .ui-select > svg { transition: rotate var(--motion-fast) var(--motion-ease); }
+  .ui-select[aria-expanded=true] > svg { rotate: 180deg; }
+  .ui-select-menu { animation: motion-reveal var(--motion-fast) var(--motion-ease); }
+  .viewer { animation: motion-reveal var(--motion-panel) var(--motion-ease); }
+  .toast, .photo-selection-bar, .shot-pin-status { animation: motion-rise var(--motion-standard) var(--motion-ease); }
+  .library-photo-card { transition: border-color var(--motion-fast), box-shadow var(--motion-fast); }
+  .library-photo-card:hover { border-color: var(--accent-border); }
+  .library-photo-card[data-arriving] { animation: motion-rise var(--motion-standard) var(--motion-ease); }
+  .shot-meta, .shot-meta-section, .shot-stage > img[data-loaded], .lighting-diagram svg { animation: motion-reveal var(--motion-standard) var(--motion-ease); }
+  .lighting-swatch { transition: background-color var(--motion-standard) var(--motion-ease); }
+  .lighting-fixture-detail { animation: motion-rise var(--motion-fast) var(--motion-ease); }
+  .lighting-beam, .lighting-node circle { transition: stroke var(--motion-fast), fill var(--motion-fast); }
+}
+@media (hover:hover) and (pointer:fine) and (prefers-reduced-motion:no-preference) {
+  :is(.photo-card-image,.session-cover) > img { transition: scale var(--motion-panel) var(--motion-ease); }
+  :is(.photo-card-image,.session-cover):hover > img { scale: 1.025; transform: none; }
+}
+@media (prefers-reduced-motion:reduce) {
+  .app-shell *, .shot-shell *, .ui-select-menu { animation-duration: 0.001ms !important; transition-duration: 0.001ms !important; }
+}
+@keyframes motion-reveal { from { opacity: .58; } }
+@keyframes motion-rise { from { opacity: .64; translate: 0 4px; } }

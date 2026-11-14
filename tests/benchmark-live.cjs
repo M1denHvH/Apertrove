@@ -1,0 +1,10 @@
+const {fork}=require('node:child_process');
+const fs=require('node:fs/promises');
+const path=require('node:path');
+const root=path.resolve(__dirname,'..'),child=fork(path.join(root,'electron/camera-worker.cjs'),[],{stdio:['ignore','pipe','pipe','ipc']});
+let next=0,readyResolve,started=0;const times=[],pending=new Map();
+const ready=new Promise(r=>readyResolve=r);
+child.on('message',m=>{if(m.event==='ready')readyResolve();if(m.event==='frame'&&started)times.push(performance.now());if(m.id){const p=pending.get(m.id);if(p){clearTimeout(p.t);pending.delete(m.id);m.error?p.reject(Error(m.error)):p.resolve(m.result);}}});
+child.stderr.on('data',d=>process.stderr.write(d));
+const call=(method,args={})=>new Promise((resolve,reject)=>{const id=++next,t=setTimeout(()=>reject(Error('Timeout '+method)),15000);pending.set(id,{resolve,reject,t});child.send({id,method,args});});
+(async()=>{await fs.mkdir(path.join(root,'qa'),{recursive:true});await ready;let cam;try{cam=await call('connect',{folder:path.join(root,'qa/captures')});if(!cam.connected)throw Error(cam.error);await call('live',{enabled:true});await new Promise(r=>setTimeout(r,1000));started=performance.now();await new Promise(r=>setTimeout(r,6000));const elapsed=(performance.now()-started)/1000;await call('live',{enabled:false});const result={model:cam.model,frames:times.length,seconds:elapsed,fps:Number((times.length/elapsed).toFixed(2)),label:process.argv[2]||'optimized',shutterReleased:false};console.log(JSON.stringify(result));const file=path.join(root,'qa/Apertrove-live-benchmark.json');let json={runs:[]};try{json=JSON.parse(await fs.readFile(file));}catch{}json.runs.push(result);await fs.writeFile(file,JSON.stringify(json,null,2));}finally{await call('shutdown').catch(()=>{});child.kill();}})().catch(e=>{console.error(e);child.kill();process.exitCode=1;});

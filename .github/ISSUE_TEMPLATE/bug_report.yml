@@ -1,0 +1,25 @@
+name: Bug report
+description: Report a reproducible camera or application problem
+body:
+  - type: input
+    id: version
+    attributes:
+      label: Apertrove version and Windows version
+    validations:
+      required: true
+  - type: textarea
+    id: hardware
+    attributes:
+      label: Camera, lens, SDK version and connection
+      description: Include lens AF/MF switch, camera dial mode and whether EOS Utility is closed. Do not include serial numbers.
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps, expected result and actual result
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Sanitized logs or screenshot
+      description: Remove private paths, photos, Wi-Fi details, QR codes and remote access keys.

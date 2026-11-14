@@ -1,0 +1,78 @@
+/* Draw the ring inside control bounds so scrollports cannot clip it. */
+:root {
+  --control-focus-width: 2px;
+  --control-focus-inset: calc(-1 * var(--control-focus-width));
+  --field-radius: 8px;
+}
+:root:is([data-design=classic],[data-design=modern]) { --field-radius: var(--ui-radius); }
+
+:is(button, input, select, textarea, summary, [tabindex]):focus-visible {
+  outline: var(--control-focus-width) solid var(--control-focus-color, var(--focus-ring));
+  outline-offset: var(--control-focus-offset, 2px);
+}
+
+:is(button, summary, input:is([type=checkbox],[type=radio])) { --control-focus-offset: var(--control-focus-inset); }
+:is(input[type=checkbox],input[type=radio]) { accent-color: var(--accent-color); }
+:is(.btn.dark, .btn.shutter, .setup-primary) { --control-focus-color: var(--on-accent); }
+.session-card-actions .btn.dark { --control-focus-color: var(--focus-ring); }
+
+:is(
+  input:not([type]), input:is([type=text],[type=search],[type=number],[type=password],[type=email],[type=url],[type=tel],[type=color]),
+  textarea, select, .ui-select, .search, .hex-label
+) {
+  --control-focus-offset: var(--control-focus-inset);
+  border-radius: var(--field-radius);
+}
+
+:is(
+  input:not([type]), input:is([type=text],[type=search],[type=number],[type=password],[type=email],[type=url],[type=tel],[type=color]),
+  textarea, select, .ui-select, .search, .hex-label
+):hover:not(:disabled,[aria-disabled=true],[readonly],:has(> input:disabled, > input[readonly])) {
+  border-color: color-mix(in srgb, var(--focus-ring) 45%, var(--border));
+}
+
+:is(
+  input:not([type]), input:is([type=text],[type=search],[type=number],[type=password],[type=email],[type=url],[type=tel],[type=color]),
+  textarea, select, .ui-select, .search, .hex-label
+):focus-within {
+  border-color: var(--focus-ring);
+}
+
+:is(.search,.hex-label,.color-picker-label,.setup-choice label):has(> input:focus-visible),
+.photo-mark > input:focus-visible + span {
+  outline: var(--control-focus-width) solid var(--control-focus-color, var(--focus-ring));
+  outline-offset: var(--control-focus-offset, var(--control-focus-inset));
+}
+.setup-choice label:has(> input:disabled) { opacity: .55; cursor: default; }
+.color-picker-label { border-radius: var(--field-radius); }
+:is(.search,.hex-label,.color-picker-label,.photo-mark,.setup-choice label) > input:focus-visible { outline: none; }
+
+:is(input,textarea)[readonly], :is(.search,.hex-label):has(> input[readonly]) {
+  background: var(--surface-soft);
+}
+:is(.search,.hex-label,.color-picker-label) > input[readonly] { background: transparent; }
+
+:is(input, textarea, select, .ui-select):is(:disabled,[aria-disabled=true]),
+:is(.search,.hex-label,.color-picker-label):has(> input:disabled) {
+  opacity: .55;
+  cursor: default;
+}
+
+:is(input, textarea, select, .ui-select):is([aria-invalid=true],:user-invalid),
+:is(.search,.hex-label):has(> input:is([aria-invalid=true],:user-invalid)) {
+  --control-focus-color: var(--error-text);
+  border-color: var(--error-text);
+  background-color: var(--error-bg);
+}
+:is(.search,.hex-label) > input:is([aria-invalid=true],:user-invalid) { background: transparent; }
+
+.exposure-grid { --control-focus-color: var(--lcd-ink, var(--focus-ring)); }
+.ui-select[aria-expanded=true] { border-color: var(--control-focus-color, var(--focus-ring)); }
+
+@media (forced-colors: active) {
+  :is(button, input, select, textarea, summary, [tabindex]):focus-visible,
+  :is(.search,.hex-label,.color-picker-label,.setup-choice label):has(> input:focus-visible),
+  .photo-mark > input:focus-visible + span {
+    outline-color: Highlight;
+  }
+}

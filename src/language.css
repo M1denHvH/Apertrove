@@ -1,0 +1,8 @@
+.language-setting .ui-select { max-inline-size: 20rem; }
+.language-setting-compact { display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin-block-end:12px; }
+.language-setting-compact > span { display:inline-flex; align-items:center; gap:8px; font-weight:700; }
+.language-setting-compact .ui-select { inline-size: min(100%, 13rem); }
+.setup-progress li, .setup-actions > *, .setting-row > div { min-inline-size:0; }
+.setup-progress li span { overflow-wrap:anywhere; }
+.setup-result p, .setup-checks small, .setting-row p { overflow-wrap:anywhere; }
+

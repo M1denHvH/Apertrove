@@ -1,0 +1,36 @@
+.splash{font:inherit;color:var(--text-muted);background:none;border:0;max-width:430px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;padding:8px 12px;-webkit-app-region:no-drag;cursor:pointer}
+.splash:hover{color:var(--accent-ink)}
+.wordmark img.brand-icon{display:block;width:28px;height:28px;padding:0;background:none;border-radius:8px}
+.af-result{font-size:10px;color:var(--text-muted);min-height:14px;margin-top:7px}
+.af-result.focused{color:var(--success-text)}.af-result.failed{color:var(--error-text)}
+/* Classic EOS control surfaces: dense panels, technical readouts and a tab accent. */
+:root[data-design="classic"] .titlebar{background:linear-gradient(var(--surface),var(--surface-soft));border-bottom:2px solid var(--accent-color)}
+:root[data-design="classic"] .nav-item,:root[data-design="classic"] .btn,:root[data-design="classic"] .settings-card,:root[data-design="classic"] .preview-panel,:root[data-design="classic"] .inspector,:root[data-design="classic"] .preset-card,:root[data-design="classic"] .tool-card{border-radius:3px}
+:root[data-design="classic"] .sidebar{background:var(--surface-soft);border-right:1px solid var(--border)}
+:root[data-design="classic"] .nav-item.active{box-shadow:inset 3px 0 var(--accent-color);background:var(--surface);color:var(--text)}
+:root[data-design="classic"] .inspector-section{border-bottom:1px solid var(--border);padding-top:15px;padding-bottom:15px}
+:root[data-design="classic"] .section-heading h3{letter-spacing:.6px;font-size:10px;text-transform:uppercase}
+:root[data-design="classic"] .exposure-grid{background:#b8c1ad;border:2px solid #828d79;border-radius:2px;padding:9px 4px;gap:4px;box-shadow:inset 0 2px 4px #26301d24}
+:root[data-design="classic"] .exposure-grid .property>span{color:#46513e}
+:root[data-design="classic"] .exposure-grid .select-wrap select{font-family:Consolas,monospace;font-weight:700;font-size:18px;background:transparent;border-color:#8d9981;color:#202b19;padding-left:4px;padding-right:12px}
+:root[data-design="classic"] .exposure-grid .select-wrap svg{color:#46513e;width:10px;right:3px}
+:root[data-design="classic"] .page-header h1{font-size:23px;font-weight:700;letter-spacing:-.5px}
+:root[data-design="classic"] .preview-toolbar{background:var(--surface-soft);border-bottom:1px solid var(--border)}
+:root[data-design="classic"] .btn{box-shadow:inset 0 1px #ffffff18,0 1px 1px #00000012}
+/* Modern: floating rail, generous cards and quiet accent washes. */
+:root[data-design="modern"] .sidebar{margin:12px 0 12px 12px;border:1px solid var(--border);border-radius:22px;box-shadow:0 4px 18px var(--shadow);padding-top:18px}
+:root[data-design="modern"] .nav-item{border-radius:15px;margin:4px 8px;width:calc(100% - 16px);padding:15px 0}
+:root[data-design="modern"] .nav-item.active{background:var(--accent-soft);color:var(--accent-ink)}
+:root[data-design="modern"] .titlebar{border-bottom-color:transparent;background:var(--background)}
+:root[data-design="modern"] .preview-panel,:root[data-design="modern"] .inspector,:root[data-design="modern"] .settings-card,:root[data-design="modern"] .tool-card,:root[data-design="modern"] .preset-card{border-radius:18px;box-shadow:0 4px 22px var(--shadow);border-color:var(--border-faint)}
+:root[data-design="modern"] .btn{border-radius:11px}
+:root[data-design="modern"] .btn.dark{box-shadow:0 4px 12px color-mix(in srgb,var(--accent-color) 18%,transparent)}
+:root[data-design="modern"] .page-header h1{font-size:29px;font-weight:700;letter-spacing:-1.2px}
+:root[data-design="modern"] .camera-card{background:var(--accent-soft);border-radius:12px;border-color:var(--accent-border)}
+:root[data-design="modern"] .preview-canvas{border-radius:12px}
+:root[data-design="modern"] .property.compact .select-wrap select{border-radius:9px;background:var(--surface-soft)}
+@media(max-width:1200px){.design-options{gap:8px}.design-option{padding:8px}.splash{max-width:330px}.design-option>small{font-size:8px}}
+
+:root[data-design="modern"] .sidebar{padding-left:6px;padding-right:6px}
+:root[data-design="modern"] .nav-item{margin:4px 0;width:100%}
+:root[data-design="classic"] .exposure-grid .select-wrap select:disabled{background:transparent;color:#46513e;opacity:1}
