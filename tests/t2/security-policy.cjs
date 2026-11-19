@@ -21,7 +21,7 @@ async function main(){
       development:'React refresh inline bootstrap and exact loopback HTTP/WS HMR need dev-only CSP transform',permissions:'deny all browser permissions; HEX clipboard uses bounded main IPC; Inspector clipboard uses bounded IPC',
       residual:'Actual Electron custom scheme, session permissions, packaged asset loading and hardware not certified by VM.'}};
   const tests=[];const add=(name,run)=>tests.push({name,run});
-  function loader({isPackaged=true,devURL,failHandleAt=0,failProtocol=false,existingProtocol=false}={}){
+  function loader({isPackaged=true,devURL,failHandleAt=0,failProtocol=false,existingProtocol=false,clipboardWriter}={}){
     const attempts=[],cache=new Map(),handlers=new Map(),protocols=new Map(),windows=[],clipboard=[],invoke=[],exposed={};
     let handleCalls=0,protocolFault=failProtocol,expectedProbe=false;const removals=[];
     const blocked=operation=>{const attempt={operation,expected:expectedProbe};attempts.push(attempt);report.denied.push(attempt);const error=Error('SECURITY_SIDE_EFFECT_DENIED: '+operation);error.code='SECURITY_SIDE_EFFECT_DENIED';throw error;};
@@ -39,7 +39,7 @@ async function main(){
     }
     const electron={app:{isPackaged},BrowserWindow,session:{fromPartition(partition){assert.equal(partition,'persist:apertrove-shot-inspector');return isolatedSession;}},
       ipcMain:{handle(channel,handler){handleCalls++;if(handleCalls===failHandleAt)throw Error('controlled IPC registration failure '+failHandleAt);if(handlers.has(channel))throw Error('duplicate channel '+channel);handlers.set(channel,handler);},removeHandler(channel){removals.push(channel);handlers.delete(channel);}},
-      utilityProcess:{fork:()=>blocked('utilityProcess.fork')},shell:{showItemInFolder:()=>blocked('shell.showItemInFolder')},clipboard:{writeText:text=>clipboard.push(text)},
+      utilityProcess:{fork:()=>blocked('utilityProcess.fork')},shell:{showItemInFolder:()=>blocked('shell.showItemInFolder')},clipboard:{writeText:text=>{clipboard.push(text);return clipboardWriter?.(text);}},
       contextBridge:{exposeInMainWorld:(name,value)=>{exposed[name]=value;}},
       ipcRenderer:{on:()=>{},removeListener:()=>{},send:()=>blocked('ipcRenderer.send'),invoke:(channel,args)=>{invoke.push({channel,args});return Promise.resolve(true);}}};
     const imports=new Map([['node:path',path],['electron',electron],['node:crypto',{randomUUID:()=>blocked('randomUUID')}],
@@ -127,6 +127,11 @@ async function main(){
     const event={sender:win.webContents,senderFrame:win.webContents.mainFrame};assert.equal(host.handlers.get('shot:boot')(event).locale,'en-US');assert.throws(()=>host.handlers.get('shot:boot')({...event,senderFrame:{}}));
     host.handlers.get('shot:copy')(event,{text:'synthetic metadata'});assert.equal(host.clipboard[0],'synthetic metadata');assert.throws(()=>host.handlers.get('shot:copy')(event,{text:'x'.repeat(100001)}));
     inspector.close();return {loads:win.loads,...host.evidence(),assertions:['actual Inspector JS with fake BrowserWindow','top-frame sender guard','bounded copy IPC preserved','no worker/filesystem/native operation']};
+  });
+  add('Inspector clipboard IPC awaits deferred acknowledgement and propagates writer rejection',async()=>{
+    let release,settled=false;const gate=new Promise(resolve=>{release=resolve;}),host=loader({clipboardWriter:()=>gate}),inspector=host.create();await inspector.open();const win=host.windows[0],event={sender:win.webContents,senderFrame:win.webContents.mainFrame};
+    const pending=host.handlers.get('shot:copy')(event,{text:'synthetic deferred copy'});assert.equal(typeof pending.then,'function');pending.then(()=>{settled=true;});await Promise.resolve();assert.equal(settled,false);release();await pending;assert.equal(settled,true);inspector.close();
+    const failure=Error('controlled asynchronous clipboard failure'),failed=loader({clipboardWriter:()=>Promise.reject(failure)}),other=failed.create();await other.open();const second=failed.windows[0];await assert.rejects(failed.handlers.get('shot:copy')({sender:second.webContents,senderFrame:second.webContents.mainFrame},{text:'synthetic failed copy'}),error=>error===failure);other.close();return {deferred:host.evidence(),rejected:failed.evidence()};
   });
   add('actual Inspector rejects invalid development URL twice before allocating a window',()=>{
     const host=loader({isPackaged:false,devURL:'https://untrusted.invalid/'}),inspector=host.create();

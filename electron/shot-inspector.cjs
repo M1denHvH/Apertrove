@@ -125,7 +125,7 @@ function createShotInspector({ latest, findPhoto, appearance, locale=()=> 'ru-RU
     },
     copy: ({ text }) => {
       if (typeof text !== 'string' || text.length > 100_000) throw Error('Не удалось скопировать данные.');
-      clipboard.writeText(text);
+      return clipboard.writeText(text);
     }
   })) {
     ipcMain.handle('shot:' + name, (event, args) => {

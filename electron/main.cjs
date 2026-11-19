@@ -1,4 +1,5 @@
 const {app,BrowserWindow,ipcMain,dialog,shell,utilityProcess,protocol,net,nativeTheme,clipboard}=require('electron');
+const integration=require('./integration-composition.cjs').consume();
 const fs=require('node:fs/promises');
 const path=require('node:path');
 const crypto=require('node:crypto');
@@ -16,7 +17,7 @@ const {deletePhotos}=require('./photo-delete.cjs');
 const {prepareSeries,runSeries}=require('./preset-series.cjs');
 const {equipmentCards,loadProduct,identify}=require('./equipment.cjs');
 const {productMedia}=require('./product-media.cjs');
-const {createFlashBridge,withFlashConnection,flashAvailability}=require('./flash-bridge.cjs');
+const {createFlashBridge,withFlashConnection,flashAvailability}=integration?.flash||require('./flash-bridge.cjs');
 const flashBridge=createFlashBridge();
 const {composition:normalizeComposition,workspace:normalizeWorkspace}=require('./workspace-settings.cjs');
 const {readMetadata}=require('./metadata.cjs');
@@ -38,7 +39,7 @@ const metadataCache=new Map();
 const previewTasks=new Set();
 app.setName('Apertrove');
 const legacyData=path.join(app.getPath('appData'),'Focal Studio');
-const dataFolder=process.env.FOCAL_TEST_DATA||selectDataFolder({legacy:legacyData,current:path.join(app.getPath('appData'),'Apertrove'),probe:folder=>require('node:fs').statSync(path.join(folder,'library.json'))});
+const dataFolder=integration?.dataFolder||process.env.FOCAL_TEST_DATA||selectDataFolder({legacy:legacyData,current:path.join(app.getPath('appData'),'Apertrove'),probe:folder=>require('node:fs').statSync(path.join(folder,'library.json'))});
 app.setPath('userData',dataFolder);
 if(!process.env.FOCAL_TEST_DATA){
   if(!app.requestSingleInstanceLock())app.quit();
@@ -86,7 +87,7 @@ function trackApplication(value){const job=Promise.resolve(value);applicationTas
 function transferRoute(destination=store.settings.captureFolder,sessionId=store.sessionId){return {sessionId,destination};}
 function call(method,args={},options={}){
   if(!workerState||workerState.exited)return Promise.reject(Error('Модуль камеры не запущен.'));
-  const timeoutMs=options.timeoutMs??(method==='capture'?(camera.properties.driveMode?.value===7?920000:85000):method==='importCard'?180000:['autofocus','focus'].includes(method)?30000:20000);
+  const timeoutMs=options.timeoutMs??integration?.requestTimeoutMs(method)??(method==='capture'?(camera.properties.driveMode?.value===7?920000:85000):method==='importCard'?180000:['autofocus','focus'].includes(method)?30000:20000);
   if(['connect','destination','capture','importCard'].includes(method)&&!args.route)args={...args,route:transferRoute(args.folder??store.settings.captureFolder)};
   return workerState.rpc.call(method,args,{timeoutMs}).catch(error=>{
     const key=error.code==='OPERATION_TIMEOUT'?'operation.timeout_draining':error.code==='OPERATION_BUSY'?'operation.busy':error.code==='OPERATION_STALE_SESSION'?'operation.stale':error.code==='OPERATION_UNKNOWN_TERMINATION'?'operation.unknown':error.code==='OPERATION_ADMISSION_CLOSED'?'operation.closed':null;
@@ -97,11 +98,12 @@ function stopInterval(reason){if(interval){interval.cancelled=true;interval=null
 function startWorker(){
   if(quitting)throw Error(t('operation.closed'));
   if(workerChannels.size>=16)throw Error(t('operation.unknown'));
-  const generation=crypto.randomUUID(),source=utilityProcess.fork(path.join(__dirname,'camera-worker.cjs'),['--apertrove-generation='+generation],{serviceName:'Apertrove Camera',stdio:'pipe',env:{...process.env,APERTROVE_RECOVERY_DESTINATION:path.join(app.getPath('userData'),'unattributed-transfers')}});
+  const generation=crypto.randomUUID(),provider=integration?.camera,source=utilityProcess.fork(provider?.entrypoint||path.join(__dirname,'camera-worker.cjs'),provider?provider.argsFor(generation):['--apertrove-generation='+generation],{serviceName:'Apertrove Camera',stdio:'pipe',env:{...process.env,APERTROVE_RECOVERY_DESTINATION:path.join(app.getPath('userData'),'unattributed-transfers'),...(provider?provider.envFor(generation):{})}});
   let exited;const channel={generation,process:source,nativeEpoch:0,exited:false,exitPromise:new Promise(resolve=>{exited=resolve;})};
   channel.rpc=createOperationClient({generation,send:message=>source.postMessage(message),getSessionEpoch:()=>channel.nativeEpoch,onChange:()=>emit('operationState',operationState())});
   channel.consumer=createTransferConsumer({generation,register:(file,context,cameraTransfer)=>queueImport([file],false,cameraTransfer,{sessionId:context.sessionId,dest:context.destination,transfer:context}),onIssue:code=>{lifecycleIssue(code);log('error',t('operation.transfer_issue'));}});
   worker=source;workerState=channel;workerChannels.add(channel);
+  integration?.onWorker(source,channel);
   source.stdout?.on('data',d=>log('info',String(d).trim()));source.stderr?.on('data',d=>log('error',String(d).trim()));
   source.on('message',m=>{
     if(!m)return;if(m.generation!==generation){if(m.event==='photo')void channel.consumer.accept(m);return;}
@@ -109,6 +111,7 @@ function startWorker(){
     // A late saved file remains accounted for even if its session/worker is old.
     if(m.event==='photo'){void channel.consumer.accept(m);return;}
     if(m.event==='nativeObservation'||m.event==='transferIssue'){channel.issue=true;lifecycleIssue(m.event==='nativeObservation'?'NATIVE_RESULT_UNKNOWN':'TRANSFER_RESULT_UNKNOWN');log('error',t('operation.transfer_issue'));return;}
+    if(!['status','burstReleased','burstProgress','focusInfo','focusPreview','frame','log'].includes(m.event))return;
     if(source!==worker||!Number.isSafeInteger(m.sessionEpoch)||m.sessionEpoch<channel.nativeEpoch)return;
     channel.nativeEpoch=m.sessionEpoch;
     if(m.event==='status'){camera=m.data;if(!camera.connected&&!accessoryBusy&&focusPreview){focusPreview=null;emit('focusPreview',null);}emit('camera',camera);if(!camera.connected&&seriesActive())series.cancelled=true;if(!camera.connected)stopInterval('Интервальная съёмка остановлена: камера отключена.');}
@@ -225,7 +228,7 @@ function installHandlers(){
     settings:async a=>{if(a.language!==undefined&&!languages.includes(a.language))throw Error(t('language.invalid'));if(a.design!==undefined&&!['current','classic','modern'].includes(a.design))throw Error('Неизвестное оформление.');if(a.theme!==undefined&&!['light','dark','system'].includes(a.theme))throw Error('Неизвестная тема.');if(a.accentColor!==undefined&&!/^#[0-9a-f]{6}$/i.test(a.accentColor))throw Error('Укажите цвет в формате #RRGGBB.');if(a.remotePort!==undefined&&(!Number.isInteger(Number(a.remotePort))||Number(a.remotePort)<1024||Number(a.remotePort)>65535))throw Error('Порт должен быть от 1024 до 65535.');if(a.remoteHost!==undefined&&!localInterfaces().some(i=>i.address===a.remoteHost))throw Error('Выберите локальный сетевой интерфейс.');if(a.performanceMode!==undefined&&typeof a.performanceMode!=='boolean')throw Error('Некорректный режим производительности.');if(a.focusPreviewOnSuccess!==undefined&&typeof a.focusPreviewOnSuccess!=='boolean')throw Error('Некорректная настройка превью AF.');if(a.focusPreviewOnSuccess===false){focusPreview=null;emit('focusPreview',null);}if(a.language!==undefined){store.settings.language=a.language;setLocale(currentLocale());}if(a.design!==undefined)store.settings.design=a.design;for(const key of ['autofocus','focusPreviewOnSuccess','grid','autoSelect','showSplashes','setupSessionSubfolder','performanceMode'])if(typeof a[key]==='boolean')store.settings[key]=a[key];if(a.theme!==undefined)store.settings.theme=a.theme;if(a.accentColor!==undefined)store.settings.accentColor=a.accentColor.toLowerCase();if(a.remotePort!==undefined)store.settings.remotePort=Number(a.remotePort);if(a.remoteHost!==undefined)store.settings.remoteHost=a.remoteHost;if(a.workspace!==undefined)store.settings.workspace=normalizeWorkspace({...store.settings.workspace,...a.workspace,panels:{...store.settings.workspace?.panels,...a.workspace?.panels}});if(a.composition!==undefined)store.settings.composition=normalizeComposition({...store.settings.composition,...a.composition,margins:{...store.settings.composition?.margins,...a.composition?.margins}});if(a.grid!==undefined)store.settings.composition=normalizeComposition({...store.settings.composition,grid:a.grid?'thirds':'off'});store.settings.grid=store.settings.composition.grid!=='off';const activeSession=store.sessions.find(s=>s.id===store.sessionId);if(activeSession){if(a.autofocus!==undefined)activeSession.autofocus=store.settings.autofocus;if(a.grid!==undefined||a.composition!==undefined){activeSession.grid=store.settings.grid;activeSession.composition=store.settings.composition;}}await persist();emit('settings',store.settings);return store.settings;},
     remoteStart:async({host,port}={})=>{const info=await remote.start({host:host||store.settings.remoteHost||localInterfaces()[0].address,port:port??store.settings.remotePort??8765});if(quitting){await remote.stop();throw Error(t('operation.closed'));}const qr=await QRCode.toDataURL(info.url,{width:280,margin:2,errorCorrectionLevel:'M'});if(quitting){await remote.stop();throw Error(t('operation.closed'));}remoteInfo={...info,qr};store.settings.remoteHost=info.host;store.settings.remotePort=info.port;await persist();emit('settings',store.settings);emit('remote',remoteInfo);return remoteInfo;},
     remoteStop:async()=>{await remote.stop();remoteInfo={running:false,clients:0};emit('remote',remoteInfo);return remoteInfo;},
-    copyRemoteLink:()=>{if(!remoteInfo.running)throw Error('Сначала включите веб-пульт.');clipboard.writeText(remoteInfo.url);return true;},
+    copyRemoteLink:async()=>{if(!remoteInfo.running)throw Error('Сначала включите веб-пульт.');await clipboard.writeText(remoteInfo.url);return true;},
     openRemote:()=>{if(!remoteInfo.running)throw Error('Сначала включите веб-пульт.');shell.openExternal(remoteInfo.url);return true;},
     session:a=>sessionAction(async()=>{
       const clean=cleanSession(a);const base=a.folder||store.settings.onboarding.workspace?.folder||sessionsRoot();let folder=base;
@@ -427,3 +430,4 @@ app.whenReady().then(async()=>{
   if(target.url)await win.loadURL(target.url);else await win.loadFile(target.file);
 });
 app.on('window-all-closed',()=>app.quit());
+integration?.onReady({getState:publicState,getWindow:()=>win,getWorker:()=>workerState,shutdown});
