@@ -67,6 +67,8 @@
       "electron/camera-capabilities.cjs",
       "electron/shot-inspector-worker.cjs",
       "electron/library.cjs",
+      "electron/library-storage.cjs",
+      "electron/library-text.cjs",
       "electron/photo-name.cjs",
       "electron/metadata.cjs",
       "electron/camera-values.cjs",

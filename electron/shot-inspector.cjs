@@ -3,7 +3,8 @@ const fs = require('node:fs/promises');
 const { createReadStream } = require('node:fs');
 const { Readable } = require('node:stream');
 const { randomUUID } = require('node:crypto');
-const { BrowserWindow, clipboard, ipcMain, session, shell, utilityProcess } = require('electron');
+const { app, BrowserWindow, clipboard, ipcMain, session, shell, utilityProcess } = require('electron');
+const {frontendTarget,denyPermissions}=require('./frontend-policy.cjs');
 
 const { windowOptions: appearanceWindowOptions } = require('./remote/appearance.js');
 
@@ -15,9 +16,7 @@ function createShotInspector({ latest, findPhoto, appearance, locale=()=> 'ru-RU
   let worker = null;
   let reader = null;
   const isolatedSession = session.fromPartition('persist:apertrove-shot-inspector');
-  isolatedSession.setPermissionRequestHandler((_contents, _permission, callback) => callback(false));
-  isolatedSession.setPermissionCheckHandler(() => false);
-  isolatedSession.protocol.handle('focal-asset', image);
+  denyPermissions(isolatedSession);
 
   const current = () => {
     const photo = latest();
@@ -52,6 +51,7 @@ function createShotInspector({ latest, findPhoto, appearance, locale=()=> 'ru-RU
       window.focus();
       return true;
     }
+    const target=frontendTarget({isPackaged:app.isPackaged,devURL:process.env.FOCAL_DEV_URL,entry:'shot-inspector.html',distDir:path.join(__dirname,'..','dist')});
     const { backgroundColor, additionalArguments } = appearanceWindowOptions(appearance());
     const inspector = new BrowserWindow({
       title: 'Shot Inspector · Apertrove', width: 1160, height: 780, minWidth: 490, minHeight: 360,
@@ -68,9 +68,7 @@ function createShotInspector({ latest, findPhoto, appearance, locale=()=> 'ru-RU
       selected = null;
       window = null;
     });
-    const url = process.env.FOCAL_DEV_URL;
-    const load = url ? inspector.loadURL(new URL('shot-inspector.html', url).href)
-      : inspector.loadFile(path.join(__dirname, '..', 'dist', 'shot-inspector.html'));
+    const load=target.url?inspector.loadURL(target.url):inspector.loadFile(target.file);
     return load.then(() => true, error => { if (!inspector.isDestroyed()) inspector.destroy(); throw error; });
   }
 
@@ -116,6 +114,8 @@ function createShotInspector({ latest, findPhoto, appearance, locale=()=> 'ru-RU
     job.postMessage({ file: photo.path });
   }
 
+  const registered=[];
+  try{
   for (const [name, handler] of Object.entries({
     boot: current, view,
     reveal: async ({ id }) => {
@@ -132,6 +132,12 @@ function createShotInspector({ latest, findPhoto, appearance, locale=()=> 'ru-RU
       if (!window || window.isDestroyed() || event.sender !== window.webContents || event.senderFrame !== window.webContents.mainFrame) throw Error('Недопустимый источник.');
       return handler(args || {});
     });
+    registered.push('shot:'+name);
+  }
+  isolatedSession.protocol.handle('focal-asset', image);
+  }catch(error){
+    for(const channel of registered)ipcMain.removeHandler(channel);
+    throw error;
   }
 
   async function image(request) {

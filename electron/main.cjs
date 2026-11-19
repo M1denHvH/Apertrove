@@ -23,7 +23,9 @@ const {readMetadata}=require('./metadata.cjs');
 const {createShotInspector}=require('./shot-inspector.cjs');
 const {onboardingState,inspectFolder}=require('./onboarding.cjs');
 const {createLibraryBootstrap,selectDataFolder}=require('./library-bootstrap.cjs');
-const {decodeLibraryBytes}=require('./library-text.cjs');
+const {readLibraryText,writeLibraryStore}=require('./library-storage.cjs');
+const {createBootApplication}=require('./boot-application.cjs');
+const {frontendTarget,denyPermissions,copyHexColor}=require('./frontend-policy.cjs');
 const metadataCache=new Map();
 const previewTasks=new Set();
 app.setName('Apertrove');
@@ -232,6 +234,7 @@ function installHandlers(){
   };
   commandRoutes=handlers;
   const desktop={
+    copyColor:({text})=>copyHexColor(text,value=>clipboard.writeText(value)),
     openShotInspector:()=>shotInspector.open(),
     onboardingSave:({step,topic,completed,skipped})=>saveOnboarding({
       ...(typeof step==='string'?{step}:{}),...(typeof topic==='string'?{topic}:{}),
@@ -311,25 +314,23 @@ function ensureReadyServices(){
   if(!worker)startWorker();
   servicesReady=true;
 }
-async function bootApplication(){
-  const failed=kind=>({bootFailure:{kind},locale:currentLocale()});
-  if(quitting)return failed('CANCELLED');
-  const result=await libraryBootstrap.boot();
-  if(quitting)return failed('CANCELLED');
-  if(result.kind!=='VALID')return failed(result.kind);
-  store=result.store;setLocale(currentLocale());
-  try{ensureReadyServices();}catch{return failed('RUNTIME_FAILED');}
-  win.setBackgroundColor(appearanceWindowOptions(currentAppearance()).backgroundColor);
-  return publicState();
-}
+const bootApplication=createBootApplication({
+  bootstrap:{boot:()=>libraryBootstrap.boot()},isQuitting:()=>quitting,
+  acceptStore:value=>{store=value;setLocale(currentLocale());},
+  initializeServices:ensureReadyServices,
+  applyAppearance:()=>win.setBackgroundColor(appearanceWindowOptions(currentAppearance()).backgroundColor),
+  publicState,locale:currentLocale
+});
 app.whenReady().then(async()=>{
   storePath=path.join(app.getPath('userData'),'library.json');cacheDir=path.join(app.getPath('userData'),'previews');
-  libraryBootstrap=createLibraryBootstrap({readText:async()=>decodeLibraryBytes(await fs.readFile(storePath)),writeStore:async candidate=>{if(candidate.settings.captureFolder)await fs.mkdir(candidate.settings.captureFolder,{recursive:true});await L.atomicJSON(storePath,candidate);},createFresh:freshLibrary,prepare:prepareLibrary});
+  libraryBootstrap=createLibraryBootstrap({readText:()=>readLibraryText(storePath),writeStore:candidate=>writeLibraryStore(storePath,candidate),createFresh:freshLibrary,prepare:prepareLibrary});
   protocol.handle('focal-asset',request=>{const id=new URL(request.url).pathname.slice(1),file=assets.get(id);return file?net.fetch(pathToFileURL(file).toString()):new Response('Not found',{status:404});});
   installHandlers();
   nativeTheme.on('updated',()=>{emit('appearance',currentAppearance());remote?.publishState();shotInspector?.publish();});
+  const target=frontendTarget({isPackaged:app.isPackaged,devURL:process.env.FOCAL_DEV_URL,entry:'index.html',distDir:path.join(__dirname,'..','dist')});
   const {backgroundColor,additionalArguments}=appearanceWindowOptions(currentAppearance());
   win=new BrowserWindow({width:1480,height:960,minWidth:1024,minHeight:720,frame:false,backgroundColor,title:'Apertrove',icon:path.join(__dirname,'..','assets','icon.png'),show:false,webPreferences:{preload:path.join(__dirname,'preload.cjs'),additionalArguments:[...additionalArguments,'--apertrove-locale='+currentLocale()],contextIsolation:true,nodeIntegration:false,sandbox:true,webSecurity:true,backgroundThrottling:false}});
+  denyPermissions(win.webContents.session);
   win.webContents.setWindowOpenHandler(()=>({action:'deny'}));win.webContents.on('will-navigate',e=>e.preventDefault());
   const publishVisibility=()=>{if(!win.isDestroyed())win.webContents.send('focal:window-visible',win.isVisible()&&!win.isMinimized()&&win.isFocused());};
   for(const event of ['minimize','restore','hide','show','focus','blur'])win.on(event,publishVisibility);
@@ -337,6 +338,6 @@ app.whenReady().then(async()=>{
   win.once('ready-to-show',()=>win.show());
   win.on('closed',()=>shotInspector?.close());
   win.on('close',e=>{if(quitting){e.preventDefault();return;}e.preventDefault();quitting=true;libraryBootstrap.dispose();stopInterval();if(seriesActive())series.cancelled=true;(async()=>{await remote?.stop();await watcher?.close();if(burstActive())await call('burstStop').catch(()=>{});if(seriesActive()||burstActive()||accessoryBusy||controlBusy||sessionTransition){while(seriesActive()||burstActive()||accessoryBusy||controlBusy||sessionTransition)await new Promise(r=>setTimeout(r,100));}await importQueue.catch(()=>{});if(worker)await Promise.race([call('shutdown').catch(()=>{}),new Promise(r=>setTimeout(r,2500))]);worker?.kill();if(libraryBootstrap.isReady())await persist();win.destroy();app.quit();})();});
-  if(process.env.FOCAL_DEV_URL)await win.loadURL(process.env.FOCAL_DEV_URL);else await win.loadFile(path.join(__dirname,'..','dist','index.html'));
+  if(target.url)await win.loadURL(target.url);else await win.loadFile(target.file);
 });
 app.on('window-all-closed',()=>app.quit());

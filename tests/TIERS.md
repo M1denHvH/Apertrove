@@ -63,3 +63,18 @@ H2: explicit properties/focus/EVF/WIA/card import без shutter.
 H3: **любой shutter/capture**, burst/timer и faults during capture.
 
 Смена уровня требует отдельного разрешения. Ни S1 runner, ни этот документ не разрешают T2/T3/H execution.
+
+## Именованные S1.5 + S2B контуры
+
+В отдельном integration worktree по явному заданию S1.5+S2B рассмотрены и выполнены только следующие новые entrypoints (они намеренно не `*.test.cjs`):
+
+| Entry | Уровень / допуск |
+|---|---|
+| `tests/t2/storage.cjs --tier T2 --scope synthetic` | T2 actual FS/shared boot через closed graph и confined adapter; только disposable qa/integration/fixtures |
+| `tests/t2/security-policy.cjs --tier T1 --scope synthetic` | **T1 VM mocks**, actual policy/Inspector/preload JS, никакого Electron runtime |
+| `tests/t2/remote-loopback.cjs --allow-t2-loopback` | T2 standalone HTTP/WS на literal127.0.0.1, fixed fake interfaces/callbacks, disabled optional addons, bounded traffic/cleanup |
+| `tests/t2/renderer.cjs` | T2 actual built React в проверенном installed Edge, synthetic profile/environment; actual guarded storage boot, явный focal RPC fixture; не Electron IPC |
+
+У всех обязательны `node --no-addons`, пустые NODE_OPTIONS/NODE_PATH. Remote/renderer требуют APERTROVE_SOURCE_COMMIT=полный проверенный HEAD. Конкретные команды, память/время, physical hashes, previous failures, limitations и compatibility matrix: `docs/SPRINT_S1_5_S2B.md` и ignored qa/integration reports.
+
+Это не разрешает запуск default `npm test`, прежних app/hardware scripts, Electron download/setup или T3/H. Library import/export/Inspector checks в browser fixture означают UI dispatch с cancelled/mock result; native file/codec success не заявляется. Actual Electron gate и main CSP acceptance остаются BLOCKED.
