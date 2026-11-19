@@ -1593,5 +1593,15 @@
   "boot.prepare_failed": "The library couldn’t be prepared.",
   "boot.persist_failed": "The prepared library data couldn’t be saved.",
   "boot.runtime_failed": "The library was loaded, but an application service couldn’t be started.",
-  "boot.safety_note": "Retrying won’t reset the library or replace an existing library with a new one."
+  "boot.safety_note": "Retrying won’t reset the library or replace an existing library with a new one.",
+  "export.protected": "This destination is a registered original or protected Apertrove data. Choose a new filename in another folder.",
+  "export.exists": "This file already exists. Choose a new filename to keep the existing file unchanged.",
+  "export.busy": "An export to this filename is already running. Wait for it to finish or choose another name.",
+  "export.destination": "This destination cannot be used safely. Choose a new filename in an accessible folder without links or junctions.",
+  "export.changed": "The destination changed during export. Check the output and choose a new filename.",
+  "export.failed": "The export could not be completed. Check the destination and try a new filename.",
+  "export.incomplete": "The export did not complete. A possibly incomplete file was retained at {{path}}. Inspect it before use and choose a new filename to retry.",
+  "import.retained": "{{name}}: {{message}} A file was retained at {{path}}. Inspect it and select it explicitly to retry registration.",
+  "boot.recovery_required": "The main library is missing, but previous library data was found. Close Apertrove and inspect the backup before restoring it. An empty library has not been created.",
+  "recovery.backup_warning": "The library was opened, but its previous-generation backup could not be updated. Existing backup data was retained. Exports remain available; inspect the backup before changing the library."
 }

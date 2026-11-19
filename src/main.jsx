@@ -222,7 +222,7 @@ function App(){
     });
   },[page,ready,!!setup]);
   if(!data){
-    const failed=boot.phase==='failed',message=({CORRUPT:'boot.corrupt',UNREADABLE:'boot.unreadable',UNSUPPORTED_VERSION:'boot.unsupported_version',MIGRATION_FAILED:'boot.prepare_failed',PERSIST_FAILED:'boot.persist_failed',RUNTIME_FAILED:'boot.runtime_failed'})[boot.error?.kind]||'boot.unreadable';
+    const failed=boot.phase==='failed',message=({CORRUPT:'boot.corrupt',UNREADABLE:'boot.unreadable',UNSUPPORTED_VERSION:'boot.unsupported_version',RECOVERY_REQUIRED:'boot.recovery_required',MIGRATION_FAILED:'boot.prepare_failed',PERSIST_FAILED:'boot.persist_failed',RUNTIME_FAILED:'boot.runtime_failed'})[boot.error?.kind]||'boot.unreadable';
     return <main className="boot-screen boot-recovery" aria-busy={!failed}>
       {failed?<AlertCircle size={38} aria-hidden="true"/>:<Aperture size={38} className="spin" aria-hidden="true"/>}
       {failed?<><h1 ref={bootHeading} tabIndex={-1}>{t("boot.failed")}</h1><p role="alert">{t(message)}</p><p>{t("boot.safety_note")}</p></>:<p role="status">{boot.phase==='retrying'?t("boot.retrying"):t("desktop.loading")}</p>}

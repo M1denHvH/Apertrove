@@ -15,6 +15,7 @@ function createLibraryBootstrap({readText,writeStore,createFresh,prepare}){
       if(typeof source!=='string')return failure('UNREADABLE');
       try{input=JSON.parse(source);}catch{return failure('CORRUPT');}
     }catch(error){
+      if(error?.code==='LIBRARY_RECOVERY_REQUIRED')return failure('RECOVERY_REQUIRED',error);
       if(error?.code!=='ENOENT')return failure('UNREADABLE',error);
       established=false;
       try{input=createFresh();}catch(error){return failure('MIGRATION_FAILED',error);}

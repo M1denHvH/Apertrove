@@ -26,6 +26,11 @@ const {createLibraryBootstrap,selectDataFolder}=require('./library-bootstrap.cjs
 const {readLibraryText,writeLibraryStore}=require('./library-storage.cjs');
 const {createBootApplication}=require('./boot-application.cjs');
 const {frontendTarget,denyPermissions,copyHexColor}=require('./frontend-policy.cjs');
+const {createLibraryCommitter}=require('./library-commits.cjs');
+const {createPhotoImporter}=require('./photo-import.cjs');
+const {createProtectedExport}=require('./protected-export.cjs');
+const {createExportService}=require('./export-service.cjs');
+const {previousPath}=require('./library-recovery.cjs');
 const metadataCache=new Map();
 const previewTasks=new Set();
 app.setName('Apertrove');
@@ -41,7 +46,7 @@ let win,worker,store,storePath,cacheDir,watcher,interval=null,sequence=0,quittin
 let shotInspector;
 let libraryBootstrap,servicesReady=false;
 let remote,remoteInfo={running:false,clients:0},commandRoutes,knownCameras=[],remoteStateTimer,desktopFrameInFlight=false,pendingDesktopFrame=null;
-let persistQueue=Promise.resolve(),importQueue=Promise.resolve();const pending=new Map(),assets=new Map();
+let importQueue=Promise.resolve();const pending=new Map(),assets=new Map();
 let burst=null,series=null,sessionTransition=false,captureMetadata=null,focusPreview=null,accessoryBusy=false,controlBusy=false;
 const burstActive=()=>burst&&['holding','transferring'].includes(burst.status);
 const seriesActive=()=>series&&['running','stopping','restoring'].includes(series.status);
@@ -56,7 +61,12 @@ const currentLocale=()=>resolveLocale(store?.settings.language||'system',app.get
 const currentAppearance=()=>normalizeAppearance(store?.settings||{},nativeTheme.shouldUseDarkColors);
 const emit=(type,data)=>{if((type==='settings'||type==='appearance')&&win&&!win.isDestroyed())win.setBackgroundColor(appearanceWindowOptions(currentAppearance()).backgroundColor);if(win&&!win.isDestroyed())win.webContents.send('focal:event',{type,data,...(type==='settings'?{appearance:currentAppearance(),locale:currentLocale()}: {})});if(type==='photo'&&data.cameraTransfer)shotInspector?.photoChanged();if(type==='settings')shotInspector?.publish();if(remote&&['camera','photo','photoUpdated','settings','state','presets','interval','series','burst','captureState','cameras','focusPreview'].includes(type)){clearTimeout(remoteStateTimer);remoteStateTimer=setTimeout(()=>remote.publishState(),30);}};
 const log=(level,message)=>{const entry={level,message,time:new Date().toISOString()};logs=[...logs.slice(-199),entry];emit('log',entry);};
-function persist(){if(!libraryBootstrap?.isReady())return Promise.reject(Error('Library is not ready.'));persistQueue=persistQueue.catch(()=>{}).then(()=>L.atomicJSON(storePath,store));return persistQueue;}
+const commits=createLibraryCommitter({getStore:()=>store,writeSnapshot:snapshot=>writeLibraryStore(storePath,snapshot),isReady:()=>!!libraryBootstrap?.isReady()});
+const exporter=createProtectedExport({getRegistry:()=>({files:[...store.photos.map(photo=>photo.path),storePath,previousPath(storePath)],directories:[path.dirname(storePath)]}),serialize:operation=>commits.runExclusive(operation)});
+const importer=createPhotoImporter({getStore:()=>store,commits,extensions:L.EXTENSIONS,uniquePath:L.uniquePath,buildPhoto:file=>L.buildPhoto(file,cacheDir),beforeRead:file=>exporter.waitForPath(file),onPhoto:entry=>emit('photo',publicPhoto(entry)),onError:item=>log('error',item.retainedPath?t('import.retained',{name:item.name,path:item.retainedPath,message:item.message}):`${item.name}: ${item.message}`),onComplete:result=>log(result.errors.length?'error':'success',`Импорт: ${result.added}; пропущено: ${result.skipped}; ошибок: ${result.errors.length}.`)});
+const exportsService=createExportService({exporter,showSaveDialog:options=>dialog.showSaveDialog(win,options),getPhoto:photo,getPresets:()=>store.presets,readMetadata,renderEditedBuffer:L.renderEditedBuffer,cleanEdits,localize:ltext,t,onPhotoExport:output=>log('success',`Экспорт: ${output}`)});
+function persist(){return commits.persist();}
+function exportTask(operation){if(sessionTransition)throw Error('Дождитесь окончания операции с библиотекой.');const job=Promise.resolve().then(operation);previewTasks.add(job);return job.finally(()=>previewTasks.delete(job));}
 function photo(id){const p=store.photos.find(p=>p.id===id);if(!p)throw Error('Снимок не найден.');return p;}
 function asset(file){if(!file)return null;const id=crypto.createHash('sha256').update(file).digest('hex');assets.set(id,file);return `focal-asset://image/${id}`;}
 function publicPhoto(p){return {...p,thumb:asset(p.thumbPath),preview:asset(p.previewPath)};}
@@ -83,20 +93,7 @@ function startWorker(){
   worker.on('exit',code=>{worker=null;for(const p of pending.values()){clearTimeout(p.timeout);p.reject(Error('Модуль камеры завершил работу. Повторите подключение.'));}pending.clear();camera={connected:false,properties:{},error:code?'Модуль камеры был перезапущен.':null};emit('camera',camera);stopInterval();if(!quitting&&code)log('error',`Модуль камеры завершился с кодом ${code}.`);});
 }
 async function addFiles(files,copy=true,context){
-  const result={added:0,skipped:0,errors:[]};const {sessionId,dest}=context;
-  if(copy&&!dest)throw Error('Сначала выберите папку для снимков.');
-  for(const source of files){
-    try{
-      if(!L.EXTENSIONS.has(path.extname(source).toLowerCase())){result.skipped++;continue;}
-      const stat=await fs.stat(source);if(!stat.isFile())continue;
-      const fingerprint=crypto.createHash('sha256').update(await fs.readFile(source)).digest('hex');
-      if(store.photos.some(p=>context.cameraTransfer?p.path===source&&p.fingerprint===fingerprint:p.fingerprint===fingerprint)){result.skipped++;continue;}
-      let target=source;
-      if(copy){await fs.mkdir(dest,{recursive:true});target=await L.uniquePath(dest,path.basename(source));await fs.copyFile(source,target,require('node:fs').constants.COPYFILE_EXCL);}
-      const p={...await L.buildPhoto(target,cacheDir),fingerprint,sessionId:store.sessions.some(s=>s.id===sessionId)?sessionId:null,equipment:context.equipment,series:context.series||undefined,burst:context.burst||undefined,cameraTransfer:context.cameraTransfer||undefined};store.photos.push(p);result.added++;await persist();emit('photo',publicPhoto(p));
-    }catch(e){result.errors.push({name:path.basename(source),message:e.message});log('error',`${path.basename(source)}: ${e.message}`);}
-  }
-  log(result.errors.length?'error':'success',`Импорт: ${result.added}; пропущено: ${result.skipped}; ошибок: ${result.errors.length}.`);return result;
+  return importer.addFiles(files,copy,context);
 }
 function queueImport(files,copy=true,cameraTransfer=false){const context={sessionId:store.sessionId,dest:store.settings.captureFolder,equipment:{camera:camera.model,lens:camera.equipment?.lensName},series:captureMetadata?.seriesId?captureMetadata:null,burst:captureMetadata?.burstId,cameraTransfer};const job=importQueue.catch(()=>{}).then(()=>addFiles(files,copy,context));importQueue=job;return job;}
 async function capture(args={},metadata=null){
@@ -177,14 +174,14 @@ function installHandlers(){
     }),
     photoUpdate:async({id,rating,edits})=>{const p=photo(id);if(rating!==undefined)p.rating=Math.max(0,Math.min(5,Math.round(Number(rating)||0)));if(edits)p.edits=cleanEdits(edits);await persist();emit('photoUpdated',publicPhoto(p));return publicPhoto(p);},
     photoMetadata:async({id})=>{const p=photo(id),stat=await fs.stat(p.path),key=`${id}:${stat.size}:${stat.mtimeMs}`;if(!metadataCache.has(key)){metadataCache.set(key,await readMetadata(p.path));if(metadataCache.size>16)metadataCache.delete(metadataCache.keys().next().value);}return metadataCache.get(key);},
-    exportMetadata:async({id})=>{const p=photo(id),result=await dialog.showSaveDialog(win,{defaultPath:path.basename(p.name,path.extname(p.name))+'.metadata.json',filters:[{name:ltext('Метаданные JSON'),extensions:['json']}]});if(result.canceled)return null;if(path.resolve(result.filePath).toLowerCase()===path.resolve(p.path).toLowerCase())throw Error('Выберите новый файл, чтобы сохранить оригинал.');await L.atomicJSON(result.filePath,await readMetadata(p.path));return result.filePath;},
+    exportMetadata:args=>exportTask(()=>exportsService.exportMetadata(args)),
     renderPreview:({id,edits})=>{if(sessionTransition)throw Error('Дождитесь окончания операции с библиотекой.');const job=(async()=>{const p=photo(id),e=cleanEdits(edits),out=path.join(cacheDir,`${id}-edit-${crypto.createHash('sha1').update(JSON.stringify(e)).digest('hex')}.jpg`);await L.renderEdited({...p,path:p.previewPath||p.path},out,e);return asset(out);})();previewTasks.add(job);return job.finally(()=>previewTasks.delete(job));},
-    exportPhoto:async({id,edits})=>{const p=photo(id);if(/\.cr[23]$/i.test(p.path))throw Error('RAW хранится без изменений. Для экспорта обработки используйте JPEG: RAW здесь показывается через встроенную миниатюру.');const res=await dialog.showSaveDialog(win,{title:ltext('Экспорт JPEG'),defaultPath:path.basename(p.name,path.extname(p.name))+'-apertrove.jpg',filters:[{name:'JPEG',extensions:['jpg']}]});if(res.canceled)return null;if(path.resolve(res.filePath).toLowerCase()===path.resolve(p.path).toLowerCase())throw Error('Выберите новое имя, чтобы сохранить оригинал.');await L.renderEdited(p,res.filePath,cleanEdits(edits||p.edits));log('success',`Экспорт: ${res.filePath}`);return res.filePath;},
+    exportPhoto:args=>exportTask(()=>exportsService.exportPhoto(args)),
     reveal:({id})=>{if(id)shell.showItemInFolder(photo(id).path);else if(store.settings.captureFolder)shell.openPath(store.settings.captureFolder);return true;},
     savePreset:async p=>{const clean=validatePreset(p);store.presets=store.presets.filter(v=>v.id!==clean.id).concat(clean);await persist();emit('presets',store.presets);return clean;},
     deletePreset:async({id})=>{store.presets=store.presets.filter(p=>p.id!==id);await persist();emit('presets',store.presets);return true;},
     applyPreset:async({id})=>{cameraIdle();const preset=store.presets.find(p=>p.id===id);if(!preset)throw Error('Пресет не найден.');const applied=[],failed=[];for(const [key,value] of Object.entries(preset.values)){try{await call('property',{key,value});applied.push(key);}catch{failed.push(key);}}if(failed.length)throw Error(`Применено ${applied.length} параметров. Недоступны: ${failed.join(', ')}.`);return {applied:applied.length};},
-    exportPresets:async()=>{const res=await dialog.showSaveDialog(win,{defaultPath:'Apertrove-presets.json',filters:[{name:ltext('Пресеты Apertrove'),extensions:['json']}]});if(res.canceled)return null;await L.atomicJSON(res.filePath,{version:1,presets:store.presets});return res.filePath;},
+    exportPresets:()=>exportTask(()=>exportsService.exportPresets()),
     importPresets:async()=>{const file=await choose(['openFile'],'Выберите JSON с пресетами');if(!file)return null;const stat=await fs.stat(file);if(stat.size>1024*1024)throw Error('Файл пресетов слишком большой.');const json=JSON.parse(await fs.readFile(file,'utf8'));if(json.version!==1||!Array.isArray(json.presets)||json.presets.length>200)throw Error('Неизвестный формат пресетов.');const items=json.presets.map(p=>validatePreset({...p,id:crypto.randomUUID()}));store.presets.push(...items);await persist();emit('presets',store.presets);return items.length;},
     settings:async a=>{if(a.language!==undefined&&!languages.includes(a.language))throw Error(t('language.invalid'));if(a.design!==undefined&&!['current','classic','modern'].includes(a.design))throw Error('Неизвестное оформление.');if(a.theme!==undefined&&!['light','dark','system'].includes(a.theme))throw Error('Неизвестная тема.');if(a.accentColor!==undefined&&!/^#[0-9a-f]{6}$/i.test(a.accentColor))throw Error('Укажите цвет в формате #RRGGBB.');if(a.remotePort!==undefined&&(!Number.isInteger(Number(a.remotePort))||Number(a.remotePort)<1024||Number(a.remotePort)>65535))throw Error('Порт должен быть от 1024 до 65535.');if(a.remoteHost!==undefined&&!localInterfaces().some(i=>i.address===a.remoteHost))throw Error('Выберите локальный сетевой интерфейс.');if(a.performanceMode!==undefined&&typeof a.performanceMode!=='boolean')throw Error('Некорректный режим производительности.');if(a.focusPreviewOnSuccess!==undefined&&typeof a.focusPreviewOnSuccess!=='boolean')throw Error('Некорректная настройка превью AF.');if(a.focusPreviewOnSuccess===false){focusPreview=null;emit('focusPreview',null);}if(a.language!==undefined){store.settings.language=a.language;setLocale(currentLocale());}if(a.design!==undefined)store.settings.design=a.design;for(const key of ['autofocus','focusPreviewOnSuccess','grid','autoSelect','showSplashes','setupSessionSubfolder','performanceMode'])if(typeof a[key]==='boolean')store.settings[key]=a[key];if(a.theme!==undefined)store.settings.theme=a.theme;if(a.accentColor!==undefined)store.settings.accentColor=a.accentColor.toLowerCase();if(a.remotePort!==undefined)store.settings.remotePort=Number(a.remotePort);if(a.remoteHost!==undefined)store.settings.remoteHost=a.remoteHost;if(a.workspace!==undefined)store.settings.workspace=normalizeWorkspace({...store.settings.workspace,...a.workspace,panels:{...store.settings.workspace?.panels,...a.workspace?.panels}});if(a.composition!==undefined)store.settings.composition=normalizeComposition({...store.settings.composition,...a.composition,margins:{...store.settings.composition?.margins,...a.composition?.margins}});if(a.grid!==undefined)store.settings.composition=normalizeComposition({...store.settings.composition,grid:a.grid?'thirds':'off'});store.settings.grid=store.settings.composition.grid!=='off';const activeSession=store.sessions.find(s=>s.id===store.sessionId);if(activeSession){if(a.autofocus!==undefined)activeSession.autofocus=store.settings.autofocus;if(a.grid!==undefined||a.composition!==undefined){activeSession.grid=store.settings.grid;activeSession.composition=store.settings.composition;}}await persist();emit('settings',store.settings);return store.settings;},
     remoteStart:async({host,port}={})=>{const info=await remote.start({host:host||store.settings.remoteHost||localInterfaces()[0].address,port:port??store.settings.remotePort??8765});remoteInfo={...info,qr:await QRCode.toDataURL(info.url,{width:280,margin:2,errorCorrectionLevel:'M'})};store.settings.remoteHost=info.host;store.settings.remotePort=info.port;await persist();emit('settings',store.settings);emit('remote',remoteInfo);return remoteInfo;},
@@ -323,7 +320,7 @@ const bootApplication=createBootApplication({
 });
 app.whenReady().then(async()=>{
   storePath=path.join(app.getPath('userData'),'library.json');cacheDir=path.join(app.getPath('userData'),'previews');
-  libraryBootstrap=createLibraryBootstrap({readText:()=>readLibraryText(storePath),writeStore:candidate=>writeLibraryStore(storePath,candidate),createFresh:freshLibrary,prepare:prepareLibrary});
+  libraryBootstrap=createLibraryBootstrap({readText:()=>readLibraryText(storePath),writeStore:async candidate=>{const status=await writeLibraryStore(storePath,candidate,{allowBackupDegradation:true});if(status?.backupWarning){try{log('error',t('recovery.backup_warning'));}catch{/* A warning cannot undo the acknowledged primary commit. */}}},createFresh:freshLibrary,prepare:prepareLibrary});
   protocol.handle('focal-asset',request=>{const id=new URL(request.url).pathname.slice(1),file=assets.get(id);return file?net.fetch(pathToFileURL(file).toString()):new Response('Not found',{status:404});});
   installHandlers();
   nativeTheme.on('updated',()=>{emit('appearance',currentAppearance());remote?.publishState();shotInspector?.publish();});

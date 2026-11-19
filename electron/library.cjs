@@ -59,4 +59,8 @@ async function renderEdited(photo, output, edits) {
   await editPipeline(sharp(source),edits).jpeg({quality:95,mozjpeg:true}).toFile(output);
   return output;
 }
-module.exports={EXTENSIONS,DEFAULT_EDITS,safeName,uniquePath,atomicJSON,loadJSON,previewSource,editPipeline,buildPhoto,renderEdited};
+async function renderEditedBuffer(photo,edits){
+  const source=await previewSource(photo.path);
+  return editPipeline(sharp(source),edits).jpeg({quality:95,mozjpeg:true}).toBuffer();
+}
+module.exports={EXTENSIONS,DEFAULT_EDITS,safeName,uniquePath,atomicJSON,loadJSON,previewSource,editPipeline,buildPhoto,renderEdited,renderEditedBuffer};

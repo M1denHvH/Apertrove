@@ -19,7 +19,7 @@ const dns=require('node:dns');
 const REPO=path.resolve(__dirname,'../..');
 const EDGE='C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe';
 const FIXTURES=path.join(REPO,'qa','integration','fixtures');
-const ALLOWED_COMMANDS=Object.freeze(['boot','window','settings','onboardingSave','cameraEndDiagnostics','sdkEnvironment','listCameras','equipment','importFiles','renderPreview','exportPhoto','exportPresets','importPresets','openShotInspector','copyColor']);
+const ALLOWED_COMMANDS=Object.freeze(['boot','window','settings','onboardingSave','cameraEndDiagnostics','sdkEnvironment','listCameras','equipment','importFiles','renderPreview','photoMetadata','exportMetadata','exportPhoto','exportPresets','importPresets','openShotInspector','copyColor']);
 const clone=value=>JSON.parse(JSON.stringify(value));
 const within=(root,file)=>{const relative=path.relative(root,file);return relative===''||(!path.isAbsolute(relative)&&relative!=='..'&&!relative.startsWith('..'+path.sep));};
 const sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms));
@@ -75,7 +75,7 @@ function installHostSentinels(){
 
 function installBridge({origin,token}){
   const listeners=new Set();
-  const commands=['boot','window','settings','onboardingSave','cameraEndDiagnostics','sdkEnvironment','listCameras','equipment','importFiles','renderPreview','exportPhoto','exportPresets','importPresets','openShotInspector','copyColor'];
+  const commands=['boot','window','settings','onboardingSave','cameraEndDiagnostics','sdkEnvironment','listCameras','equipment','importFiles','renderPreview','photoMetadata','exportMetadata','exportPhoto','exportPresets','importPresets','openShotInspector','copyColor'];
   const rpc=async(method,args={})=>{
     if(!commands.includes(method))throw Error('Unknown fixture command');
     const response=await fetch(origin+'/__fixture/rpc',{method:'POST',headers:{'Content-Type':'application/json','X-Fixture-Token':token},body:JSON.stringify({fixture:new URL(location.href).searchParams.get('fixture'),method,args})});
@@ -155,7 +155,7 @@ async function main(){
     if(corrupt)await fsp.writeFile(filename,'{synthetic-corrupt');else if(!missing)await fsp.writeFile(filename,JSON.stringify(fixture.valid()));
     fixture.bootstrap=createLibraryBootstrap({
       readText:async()=>{fixture.reads++;if(fixture.reads>1)await sleep(400);return storage.readLibraryText(filename);},
-      writeStore:async candidate=>{await storage.writeLibraryStore(filename,candidate);fixture.writes++;},
+      writeStore:async candidate=>{const status=await storage.writeLibraryStore(filename,candidate,{allowBackupDegradation:true});fixture.backupWarning=status?.backupWarning;fixture.writes++;},
       createFresh:()=>fresh(photosFolder),
       prepare:(candidate,{established})=>{
         migrateSessions(candidate,photosFolder);
@@ -168,6 +168,10 @@ async function main(){
     cases.set(name,fixture);return fixture;
   }
   const recovery=await makeCase('recovery',{corrupt:true}),onboarding=await makeCase('onboarding',{missing:true}),valid=await makeCase('valid');
+  const backupOnly=await makeCase('backup-only',{missing:true}),degraded=await makeCase('degraded');
+  const backupOnlyPath=path.join(path.dirname(backupOnly.filename),'library.previous.json'),degradedPath=path.join(path.dirname(degraded.filename),'library.previous.json');
+  const backupOnlyBytes=JSON.stringify(backupOnly.valid()),degradedBytes='{synthetic-corrupt-backup';
+  await fsp.writeFile(backupOnlyPath,backupOnlyBytes);await fsp.writeFile(degradedPath,degradedBytes);
   async function dispatch(fixture,method,args){
     assert.ok(ALLOWED_COMMANDS.includes(method),'Unknown fixture command: '+method);
     fixture.calls.push({method,args:clone(args||{})});
@@ -186,7 +190,9 @@ async function main(){
     if(method==='listCameras')return {result:[]};
     if(method==='equipment')return {result:Object.fromEntries(['camera','lens'].map(kind=>[kind,{kind,name:'',source:null,manufacturer:'',connected:false,facts:[],stats:[]}]))}; // No source/name: never asks for manufacturer/product media.
     if(method==='renderPreview'){assert.equal(args.id,'synthetic-photo');return {result:png};} // Fixture pixels only; no Sharp/codec execution.
-    if(['importFiles','exportPhoto','exportPresets','importPresets'].includes(method))return {result:null}; // Explicit dialog cancellation; no native/codec success.
+    if(method==='photoMetadata'){assert.equal(args.id,'synthetic-photo');return {result:{file:{name:'synthetic.png',width:1,height:1,bytes:68},metadata:{EXIF:{Artist:'Synthetic fixture'}},errors:[]}};}
+    if(method==='exportMetadata'&&fixture.failMetadataOnce){fixture.failMetadataOnce=false;return {error:label('export.exists')};} // Expected policy rejection, not an unhandled RPC refusal.
+    if(['importFiles','exportPhoto','exportMetadata','exportPresets','importPresets'].includes(method))return {result:null}; // Explicit dialog cancellation; no native/codec success.
     if(method==='openShotInspector')return {result:true}; // Dispatch evidence only; no Electron inspector window.
     if(method==='copyColor'){assert.match(args.text,/^#[0-9a-f]{6}$/i);return {result:args.text};} // No OS clipboard.
     throw Error('Unhandled fixture method');
@@ -251,6 +257,22 @@ async function main(){
   checks.push('actual React recovery heading/alert, keyboard retry, repeated corrupt error and preserved source, real-file correction to ready');
   await recovered.screenshot({path:path.join(runRoot,'recovered.png'),animations:'disabled'});await recovered.close();
 
+  const backupPage=await open('backup-only');
+  await backupPage.getByRole('heading',{name:label('boot.failed'),exact:true}).waitFor();
+  assert.ok((await backupPage.getByRole('alert').innerText()).includes(label('boot.recovery_required')));
+  assert.equal(backupOnly.writes,0);assert.equal(backupOnly.services,0);assert.equal(fs.existsSync(backupOnly.filename),false);
+  assert.equal(await fsp.readFile(backupOnlyPath,'utf8'),backupOnlyBytes);
+  await backupPage.screenshot({path:path.join(runRoot,'backup-only.png'),animations:'disabled'});await backupPage.close();
+  checks.push('actual React missing-primary/present-backup recovery alert; no empty library/services/write and backup bytes retained');
+
+  const degradedPage=await open('degraded');
+  await degradedPage.locator('.page-header h1').filter({hasText:label('desktop.sessions')}).waitFor();
+  assert.ok(degraded.backupWarning);assert.equal(degraded.services,1);assert.equal(await fsp.readFile(degradedPath,'utf8'),degradedBytes);
+  await degradedPage.locator('.sidebar').getByRole('button',{name:label('desktop.presets'),exact:true}).click();
+  await degradedPage.getByRole('button',{name:label('desktop.export_json'),exact:true}).click();await waitForCount(degraded,'exportPresets',1);
+  await degradedPage.close();
+  checks.push('actual React remains usable with valid primary/corrupt backup via boot-only degradation; backup retained and export dispatch available');
+
   const firstRun=await open('onboarding');
   await firstRun.getByRole('heading',{name:label('onboarding.hi_this_is_apertrove'),exact:true}).waitFor();
   assert.equal(onboarding.store.settings.onboarding.completed,false);assert.equal(onboarding.writes,1);
@@ -284,11 +306,23 @@ async function main(){
   await page.locator('.page-header h1').click();await page.keyboard.press('Control+i');await waitForCount(valid,'importFiles',2);
   await page.getByRole('button',{name:label('photoActions.open').replace('{{v0}}','synthetic.png'),exact:true}).click();
   await page.locator('.viewer').waitFor();await page.getByRole('button',{name:label('desktop.export_jpeg'),exact:true}).click();await waitForCount(valid,'exportPhoto',1);
+  await page.getByRole('button',{name:label('desktop.all_metadata'),exact:true}).click();
+  const metadata=page.locator('.photo-metadata'),jsonExport=metadata.getByRole('button',{name:'JSON',exact:true});
+  await metadata.waitFor();await waitForCount(valid,'photoMetadata',1);await jsonExport.waitFor();
+  await page.waitForFunction(()=>document.querySelector('.photo-metadata .metadata-rows')?.children.length>0);
+  const metadataRows=await metadata.locator('.metadata-rows>div').count();valid.failMetadataOnce=true;
+  await jsonExport.click();await waitForCount(valid,'exportMetadata',1);
+  await metadata.getByRole('alert').filter({hasText:label('export.exists')}).waitFor();
+  assert.equal(await metadata.locator('.metadata-rows>div').count(),metadataRows);assert.equal(await jsonExport.isEnabled(),true);
+  await page.screenshot({path:path.join(runRoot,'metadata-export-error.png'),animations:'disabled'});
+  await jsonExport.click();await waitForCount(valid,'exportMetadata',2);
+  await metadata.getByRole('alert').waitFor({state:'detached'});assert.equal(await metadata.locator('.metadata-rows>div').count(),metadataRows);
+  await page.keyboard.press('Escape');await metadata.waitFor({state:'detached'});
   await page.keyboard.press('Escape');await page.locator('.viewer').waitFor({state:'detached'});
   await nav.getByRole('button',{name:label('desktop.presets'),exact:true}).click();
   await page.getByRole('button',{name:label('desktop.export_json'),exact:true}).click();await waitForCount(valid,'exportPresets',1);
   await page.getByRole('button',{name:label('desktop.import_json'),exact:true}).click();await waitForCount(valid,'importPresets',1);
-  checks.push('UI dispatch only: Inspector/import via button+Ctrl-I/export JPEG/preset JSON import+export; dialogs return cancelled, no native success claimed');
+  checks.push('UI dispatch only: Inspector/import via button+Ctrl-I/export JPEG/metadata JSON/preset JSON import+export; cancellation retained; metadata policy rejection is visible, preserves tags and permits retry without pageerror');
   await nav.getByRole('button',{name:'Lighting Studio',exact:true}).click();
   await page.locator('.lighting-swatches button').first().click();await waitForCount(valid,'copyColor',1);
   assert.match(valid.calls.find(call=>call.method==='copyColor').args.text,/^#[0-9a-f]{6}$/i);

@@ -2,10 +2,11 @@
 const fs=require('node:fs/promises');
 const path=require('node:path');
 const crypto=require('node:crypto');
-const {decodeLibraryBytes}=require('./library-text.cjs');
+const {readPrimaryLibraryText,writeLibraryGeneration}=require('./library-recovery.cjs');
+const {validateLibrary}=require('./library-schema.cjs');
 
 async function readLibraryText(filename){
-  return decodeLibraryBytes(await fs.readFile(filename));
+  return readPrimaryLibraryText(filename);
 }
 
 async function atomicJSON(filename,value){
@@ -15,9 +16,10 @@ async function atomicJSON(filename,value){
   await fs.rename(tmp,filename);
 }
 
-async function writeLibraryStore(filename,candidate){
+async function writeLibraryStore(filename,candidate,options){
+  if(validateLibrary(candidate).kind!=='VALID'||candidate.version!==2){const error=Error('Invalid prepared library candidate.');error.code='LIBRARY_CANDIDATE_INVALID';throw error;}
   if(candidate.settings.captureFolder)await fs.mkdir(candidate.settings.captureFolder,{recursive:true});
-  await atomicJSON(filename,candidate);
+  return writeLibraryGeneration(filename,candidate,options);
 }
 
 module.exports={readLibraryText,atomicJSON,writeLibraryStore};

@@ -69,6 +69,8 @@
       "electron/library.cjs",
       "electron/library-storage.cjs",
       "electron/library-text.cjs",
+      "electron/library-recovery.cjs",
+      "electron/library-schema.cjs",
       "electron/photo-name.cjs",
       "electron/metadata.cjs",
       "electron/camera-values.cjs",

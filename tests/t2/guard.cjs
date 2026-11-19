@@ -8,7 +8,7 @@ const crypto=require('node:crypto');
 const {TextDecoder}=require('node:util');
 
 const REVIEWED_MODULES=Object.freeze([
-  'electron/library-storage.cjs','electron/library-text.cjs',
+  'electron/library-storage.cjs','electron/library-text.cjs','electron/library-recovery.cjs',
   'electron/library-bootstrap.cjs','electron/library-schema.cjs',
   'electron/boot-application.cjs','electron/sessions.cjs',
   'electron/workspace-settings.cjs','electron/photo-name.cjs',
@@ -78,6 +78,19 @@ function createProductionGuard({repoRoot,fixtureRoot,allowedModules=REVIEWED_MOD
       const bytes=typeof data==='string'?Buffer.byteLength(data):data.byteLength;
       charge('writeFile',[target],bytes);return fsp.writeFile(target,data);
     },
+    async open(file,flags){
+      const target=checkedPath(file,'open');
+      if(flags!=='wx')deny('filesystem',{operation:'open flags'},'T2_FS_OPERATION_DENIED');
+      charge('open',[target]);const handle=await fsp.open(target,'wx');
+      return Object.freeze({
+        async writeFile(data,options){
+          if(options!==undefined||(typeof data!=='string'&&!ArrayBuffer.isView(data)))deny('filesystem',{operation:'handle writeFile arguments'},'T2_FS_OPERATION_DENIED');
+          charge('writeFile',[target],typeof data==='string'?Buffer.byteLength(data):data.byteLength);
+          return handle.writeFile(data);
+        },
+        async close(){return handle.close();}
+      });
+    },
     async rename(from,to){
       const source=checkedPath(from,'rename source'),target=checkedPath(to,'rename destination');
       charge('rename',[source,target]);return fsp.rename(source,target);
@@ -86,7 +99,7 @@ function createProductionGuard({repoRoot,fixtureRoot,allowedModules=REVIEWED_MOD
   const fsFacade=new Proxy(Object.freeze(fsMethods),{get(target,key){if(Object.hasOwn(target,key))return target[key];deny('filesystem',{operation:String(key)},'T2_FS_OPERATION_DENIED');}});
   const builtins=new Map([
     ['node:fs/promises',fsFacade],['node:path',path],
-    ['node:crypto',Object.freeze({randomUUID:crypto.randomUUID})],
+    ['node:crypto',Object.freeze({randomUUID:crypto.randomUUID,createHash:crypto.createHash})],
     ['node:util',Object.freeze({TextDecoder})]
   ]);
   function resolve(request,parent){
