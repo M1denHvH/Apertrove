@@ -161,3 +161,8 @@
   .app-shell > main { padding-top: 14px; }
   .page-header { min-height: 46px; margin-bottom: 12px; }
 }
+
+.boot-recovery { box-sizing: border-box; padding: 32px; text-align: center; }
+.boot-recovery h1 { margin: 0; font-size: 24px; color: var(--text); }
+.boot-recovery p { max-width: 58ch; line-height: 1.6; color: var(--text-secondary); }
+.boot-recovery-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 12px; }

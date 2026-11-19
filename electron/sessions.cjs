@@ -1,7 +1,7 @@
 const path=require('node:path');
 const crypto=require('node:crypto');
 const {composition}=require('./workspace-settings.cjs');
-const {safeName}=require('./library.cjs');
+const {safeName}=require('./photo-name.cjs');
 function migrateSessions(store,root){
   store.sessions=Array.isArray(store.sessions)?store.sessions:[];
   for(const session of store.sessions){

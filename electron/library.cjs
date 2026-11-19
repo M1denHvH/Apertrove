@@ -3,9 +3,9 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 const sharp = require('sharp');
 const exifr = require('exifr');
+const {safeName}=require('./photo-name.cjs');
 const EXTENSIONS = new Set(['.jpg','.jpeg','.png','.webp','.tif','.tiff','.cr2','.cr3']);
 const DEFAULT_EDITS = { exposure: 0, contrast: 0, saturation: 0, warmth: 0, monochrome: false, rotation: 0 };
-function safeName(name) { return String(name || 'Съёмка').replace(/[<>:"/\\|?*\x00-\x1f]/g,'_').replace(/[. ]+$/,'').slice(0,100) || 'Съёмка'; }
 async function uniquePath(dir, filename) {
   const ext = path.extname(filename), stem = path.basename(filename,ext);
   for (let i=0;i<10000;i++) { const target=path.join(dir, `${stem}${i ? `_${i}` : ''}${ext}`); try { await fs.access(target); } catch { return target; } }
@@ -17,7 +17,7 @@ async function atomicJSON(filename, value) {
   await fs.writeFile(tmp,JSON.stringify(value,null,2));
   await fs.rename(tmp,filename);
 }
-async function loadJSON(filename, fallback) { try { return JSON.parse(await fs.readFile(filename,'utf8')); } catch { return fallback; } }
+async function loadJSON(filename, fallback) { try { return JSON.parse(await fs.readFile(filename,'utf8')); } catch(error) { if(error.code==='ENOENT')return fallback;throw error; } }
 async function previewSource(file) {
   if (/\.cr[23]$/i.test(file)) {
     const preview = await exifr.thumbnail(file).catch(()=>null);

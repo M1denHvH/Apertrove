@@ -1583,5 +1583,15 @@
   "desktop.device_index": "Device {{index}}",
   "desktop.imported_presets": "Imported {{presets}}",
   "language.name.ru_ru": "Русский",
-  "language.name.en_us": "English"
+  "language.name.en_us": "English",
+  "boot.failed": "Couldn’t open the library",
+  "boot.retry": "Retry loading",
+  "boot.retrying": "Retrying…",
+  "boot.corrupt": "The library data is damaged or has an invalid format.",
+  "boot.unreadable": "The library couldn’t be read. Check the drive and folder permissions.",
+  "boot.unsupported_version": "This version of Apertrove doesn’t support the library format.",
+  "boot.prepare_failed": "The library couldn’t be prepared.",
+  "boot.persist_failed": "The prepared library data couldn’t be saved.",
+  "boot.runtime_failed": "The library was loaded, but an application service couldn’t be started.",
+  "boot.safety_note": "Retrying won’t reset the library or replace an existing library with a new one."
 }

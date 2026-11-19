@@ -41,6 +41,7 @@ import PhotoMetadata from './PhotoMetadata';
 import BurstShutter from './BurstShutter';
 import {CompositionSettings,StaticGuides} from './Composition';
 import {InspectorFrame,WorkspaceEditor} from './Workspace';
+import '../electron/boot-state.js';
 
 const api=window.focal;
 const labels=localized(() => ({meteringMode:t("desktop.metering_mode"),imageQuality:t("desktop.image_quality"),driveMode:t("desktop.drive_mode"),afMode:t("desktop.af_mode"),liveAfMode:t("desktop.live_view_af_method"),iso:'ISO',shutter:t("desktop.shutter_speed"),aperture:t("desktop.aperture"),whiteBalance:t("desktop.white_balance"),compensation:t("desktop.exposure_compensation"),pictureStyle:'Picture Style'}));
@@ -62,6 +63,7 @@ function App(){
   const [setupView,setSetupView]=useState(null),[setupDismissed,setSetupDismissed]=useState(false),[tutorial,setTutorial]=useState(null);
   const [data,setData]=useState(null),[page,setPage]=useState('sessions'),[selected,setSelected]=useState(null),[busy,setBusy]=useState(''),[toasts,setToasts]=useState([]),[modal,setModal]=useState(null),[search,setSearch]=useState(''),[filter,setFilter]=useState('all'),[zoom,setZoom]=useState(1),[grid,setGrid]=useState(false),[edited,setEdited]=useState(null),[rendered,setRendered]=useState(null),[compare,setCompare]=useState(false),[presetDraft,setPresetDraft]=useState(null),[cardFiles,setCardFiles]=useState(null),[cardSelected,setCardSelected]=useState([]),[intervalCount,setIntervalCount]=useState(12),[intervalSeconds,setIntervalSeconds]=useState(5),[sessionDraft,setSessionDraft]=useState(null),[librarySeries,setLibrarySeries]=useState(''),[metadataOpen,setMetadataOpen]=useState(false),[libraryScope,setLibraryScope]=useState('all');
   const arrival=useRef(null), previousNav=useRef(null);
+  const bootController=useRef(null),bootHeading=useRef(null),[boot,setBoot]=useState({phase:'loading'});
   const selectedRef=useRef(selected),previewGeneration=useRef(0),toastId=useRef(0),burstOwner=useRef(false);selectedRef.current=selected;
   const [focusStep,setFocusStep]=useState(1),[focusPreviewVisible,setFocusPreviewVisible]=useState(false),[sessionDeleteProgress,setSessionDeleteProgress]=useState(null);
   const [photoSelectionMode,setPhotoSelectionMode]=useState(false),[markedPhotos,setMarkedPhotos]=useState([]),[photoDeleteDraft,setPhotoDeleteDraft]=useState(null),[photoDeleteProgress,setPhotoDeleteProgress]=useState(null);
@@ -69,8 +71,13 @@ function App(){
   const run=useCallback(async(name,fn)=>{setBusy(name);try{return await fn();}catch(e){toast(errMessage(e),'error');return undefined;}finally{setBusy('');}},[toast]);
   useEffect(()=>{
     if(!api)return;
-    api.boot().then(d=>{setLocale(d.locale);setData(d);setGrid(d.settings.grid);}).catch(e=>toast(errMessage(e),'error'));
-    return api.on(({type,data:d,appearance,locale})=>{
+    const controller=globalThis.ApertroveBoot.createBootController({load:()=>api.boot(),locale:api.initialLocale,onState:next=>{
+      setBoot(next);setLocale(next.locale);
+      if(next.phase==='ready'){setData(next.data);setGrid(next.data.settings.grid);}
+    }});
+    bootController.current=controller;
+    void controller.request();
+    const unsubscribe=api.on(({type,data:d,appearance,locale})=>{
       if(type==='settings'||type==='state')setLocale(locale??d.locale);
       if(type==='photo')arrival.current={id:d.id,at:performance.now()};
       if(type==='photoDeletion'){setPhotoDeleteProgress(d);return;}
@@ -87,7 +94,9 @@ function App(){
         if(type==='log')return {...old,logs:[...old.logs.slice(-199),d]};return old;
       });
     });
+    return()=>{controller.dispose();unsubscribe();if(bootController.current===controller)bootController.current=null;};
   },[]);
+  useEffect(()=>{if(boot.phase==='failed')bootHeading.current?.focus();},[boot.phase]);
   const cam=data?.camera||{},photos=data?.photos||[],photo=photos.find(p=>p.id===selected),session=data?.sessions.find(s=>s.id===data.sessionId);
   const viewerPhotos=photos.filter(p=>page==='capture'?!!data?.sessionId&&p.sessionId===data.sessionId:inLibraryScope(p,libraryScope,data?.sessionId)&&(!librarySeries||p.series?.seriesId===librarySeries)&&(!search||p.name.toLowerCase().includes(search.toLowerCase()))&&(filter!=='favorites'||p.rating>=4)).slice().reverse();
   const nativeBurstBusy=!!data?.burst&&['holding','transferring'].includes(data.burst.status);
@@ -115,7 +124,7 @@ function App(){
   const openPhoto=id=>{setSelected(id);setModal('viewer');};
   const movePhoto=delta=>{if(viewerPhotos.length)setSelected(viewerPhotos[(viewerPhotos.findIndex(p=>p.id===selected)+delta+viewerPhotos.length)%viewerPhotos.length].id);};
   useEffect(()=>{
-    const fn=e=>{if(setup)return;if(tutorial&&(e.code==='Escape'||e.target.closest?.('.tutorial-coach')))return;if((modal==='sessionDelete'&&busy==='sessionDelete')||(modal==='photoDelete'&&busy==='photoDelete'))return;if(e.defaultPrevented||e.target.closest?.('[role=combobox],[role=listbox],[role=option]'))return;if(e.target.matches?.('input:not([type=checkbox]),select,textarea,[contenteditable=true]'))return;
+    const fn=e=>{if(!data||setup)return;if(tutorial&&(e.code==='Escape'||e.target.closest?.('.tutorial-coach')))return;if((modal==='sessionDelete'&&busy==='sessionDelete')||(modal==='photoDelete'&&busy==='photoDelete'))return;if(e.defaultPrevented||e.target.closest?.('[role=combobox],[role=listbox],[role=option]'))return;if(e.target.matches?.('input:not([type=checkbox]),select,textarea,[contenteditable=true]'))return;
       if(e.code==='Escape'){if(photoSelectionMode&&!modal){setPhotoSelectionMode(false);setMarkedPhotos([]);return;}if(metadataOpen){setMetadataOpen(false);return;}setModal(null);return;}
       if(e.key==='Delete'&&!metadataOpen&&!photoDeletionBlocked&&(modal==='viewer'&&photo||!modal&&page==='library'&&markedPhotos.length)){e.preventDefault();requestDeletePhotos(modal==='viewer'?[photo.id]:markedPhotos);return;}
       if(modal&&modal!=='viewer')return;
@@ -212,7 +221,14 @@ function App(){
       if(marker&&previous!=null&&Math.abs(previous-y)<180)gsap.from(marker,{y:previous-y,duration,ease:'power3.out',clearProps:'transform'});
     });
   },[page,ready,!!setup]);
-  if(!data)return <div className="boot-screen"><Aperture size={38} className="spin"/><p>{t("desktop.loading")}</p></div>;
+  if(!data){
+    const failed=boot.phase==='failed',message=({CORRUPT:'boot.corrupt',UNREADABLE:'boot.unreadable',UNSUPPORTED_VERSION:'boot.unsupported_version',MIGRATION_FAILED:'boot.prepare_failed',PERSIST_FAILED:'boot.persist_failed',RUNTIME_FAILED:'boot.runtime_failed'})[boot.error?.kind]||'boot.unreadable';
+    return <main className="boot-screen boot-recovery" aria-busy={!failed}>
+      {failed?<AlertCircle size={38} aria-hidden="true"/>:<Aperture size={38} className="spin" aria-hidden="true"/>}
+      {failed?<><h1 ref={bootHeading} tabIndex={-1}>{t("boot.failed")}</h1><p role="alert">{t(message)}</p><p>{t("boot.safety_note")}</p></>:<p role="status">{boot.phase==='retrying'?t("boot.retrying"):t("desktop.loading")}</p>}
+      <div className="boot-recovery-actions">{failed&&<Button type="button" kind="dark" icon={RefreshCw} onClick={()=>void bootController.current?.request()}>{t("boot.retry")}</Button>}<Button type="button" onClick={()=>void api.window({action:'close'}).catch(()=>{})}>{t("desktop.close_apertrove")}</Button></div>
+    </main>;
+  }
   const workspace=data.settings.workspace,composition=data.settings.composition;const showInspector=workspace.order.some(key=>workspace.panels[key]);
   const currentPhotos=photos.filter(p=>!!data.sessionId&&p.sessionId===data.sessionId),displayPhotos=photos.filter(p=>inLibraryScope(p,libraryScope,data.sessionId)&&(!search||p.name.toLowerCase().includes(search.toLowerCase()))&&(!librarySeries||p.series?.seriesId===librarySeries)&&(filter!=='favorites'||p.rating>=4)).slice().reverse();
   const shownImage=(focusPreviewVisible&&data.focusPreview?.image)||(cam.live&&page==='capture'&&!modal)||((!compare&&rendered)||photo?.preview);

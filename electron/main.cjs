@@ -22,12 +22,14 @@ const {composition:normalizeComposition,workspace:normalizeWorkspace}=require('.
 const {readMetadata}=require('./metadata.cjs');
 const {createShotInspector}=require('./shot-inspector.cjs');
 const {onboardingState,inspectFolder}=require('./onboarding.cjs');
+const {createLibraryBootstrap,selectDataFolder}=require('./library-bootstrap.cjs');
+const {decodeLibraryBytes}=require('./library-text.cjs');
 const metadataCache=new Map();
 const previewTasks=new Set();
 app.setName('Apertrove');
 const legacyData=path.join(app.getPath('appData'),'Focal Studio');
-const dataFolder=require('node:fs').existsSync(path.join(legacyData,'library.json'))?legacyData:path.join(app.getPath('appData'),'Apertrove');
-app.setPath('userData',process.env.FOCAL_TEST_DATA||dataFolder);
+const dataFolder=process.env.FOCAL_TEST_DATA||selectDataFolder({legacy:legacyData,current:path.join(app.getPath('appData'),'Apertrove'),probe:folder=>require('node:fs').statSync(path.join(folder,'library.json'))});
+app.setPath('userData',dataFolder);
 if(!process.env.FOCAL_TEST_DATA){
   if(!app.requestSingleInstanceLock())app.quit();
   app.on('second-instance',()=>{if(win&&!win.isDestroyed()){if(win.isMinimized())win.restore();win.show();win.focus();}});
@@ -35,6 +37,7 @@ if(!process.env.FOCAL_TEST_DATA){
 protocol.registerSchemesAsPrivileged([{scheme:'focal-asset',privileges:{standard:true,secure:true,supportFetchAPI:true}}]);
 let win,worker,store,storePath,cacheDir,watcher,interval=null,sequence=0,quitting=false,captureActive=false,camera={connected:false,properties:{}},logs=[];
 let shotInspector;
+let libraryBootstrap,servicesReady=false;
 let remote,remoteInfo={running:false,clients:0},commandRoutes,knownCameras=[],remoteStateTimer,desktopFrameInFlight=false,pendingDesktopFrame=null;
 let persistQueue=Promise.resolve(),importQueue=Promise.resolve();const pending=new Map(),assets=new Map();
 let burst=null,series=null,sessionTransition=false,captureMetadata=null,focusPreview=null,accessoryBusy=false,controlBusy=false;
@@ -47,15 +50,15 @@ function sessionIdle(allowWatcher=false){if(accessoryBusy||controlBusy||seriesAc
 const sessionsRoot=()=>path.join(process.env.FOCAL_TEST_DATA?path.join(process.env.FOCAL_TEST_DATA,'Pictures'):app.getPath('pictures'),'Apertrove');
 const {languages, supportedLocales, resolve: resolveLocale, migrate: migrateLanguage, register, setLocale, legacy:ltext, t, starterPresetLabel}=require('./i18n/runtime.js');
 for(const locale of supportedLocales)register(locale,require('./i18n/locales/'+locale+'.json'));
-const currentLocale=()=>resolveLocale(store.settings.language,app.getPreferredSystemLanguages());
-const currentAppearance=()=>normalizeAppearance(store.settings,nativeTheme.shouldUseDarkColors);
+const currentLocale=()=>resolveLocale(store?.settings.language||'system',app.getPreferredSystemLanguages());
+const currentAppearance=()=>normalizeAppearance(store?.settings||{},nativeTheme.shouldUseDarkColors);
 const emit=(type,data)=>{if((type==='settings'||type==='appearance')&&win&&!win.isDestroyed())win.setBackgroundColor(appearanceWindowOptions(currentAppearance()).backgroundColor);if(win&&!win.isDestroyed())win.webContents.send('focal:event',{type,data,...(type==='settings'?{appearance:currentAppearance(),locale:currentLocale()}: {})});if(type==='photo'&&data.cameraTransfer)shotInspector?.photoChanged();if(type==='settings')shotInspector?.publish();if(remote&&['camera','photo','photoUpdated','settings','state','presets','interval','series','burst','captureState','cameras','focusPreview'].includes(type)){clearTimeout(remoteStateTimer);remoteStateTimer=setTimeout(()=>remote.publishState(),30);}};
 const log=(level,message)=>{const entry={level,message,time:new Date().toISOString()};logs=[...logs.slice(-199),entry];emit('log',entry);};
-function persist(){persistQueue=persistQueue.catch(()=>{}).then(()=>L.atomicJSON(storePath,store));return persistQueue;}
+function persist(){if(!libraryBootstrap?.isReady())return Promise.reject(Error('Library is not ready.'));persistQueue=persistQueue.catch(()=>{}).then(()=>L.atomicJSON(storePath,store));return persistQueue;}
 function photo(id){const p=store.photos.find(p=>p.id===id);if(!p)throw Error('Снимок не найден.');return p;}
 function asset(file){if(!file)return null;const id=crypto.createHash('sha256').update(file).digest('hex');assets.set(id,file);return `focal-asset://image/${id}`;}
 function publicPhoto(p){return {...p,thumb:asset(p.thumbPath),preview:asset(p.previewPath)};}
-const publicState=()=>({...store,locale:currentLocale(),appearance:currentAppearance(),showOnboarding:!store.settings.onboarding.completed&&(!process.env.FOCAL_TEST_DATA||process.env.FOCAL_TEST_ONBOARDING==='1'),photos:store.photos.map(publicPhoto),camera,cameras:knownCameras,remote:remoteInfo,interfaces:localInterfaces(),logs,interval,series,burst,focusPreview,captureState:{active:captureActive},values:VALUES,watching:!!watcher});
+const publicState=()=>({...store,locale:currentLocale(),appearance:currentAppearance(),showOnboarding:!store.settings.onboarding.completed&&(!process.env.FOCAL_TEST_DATA||process.env.FOCAL_TEST_ONBOARDING==='1'),photos:store.photos.map(publicPhoto),camera,cameras:knownCameras,remote:remoteInfo,interfaces:localInterfaces(),logs,interval,series,burst,focusPreview,captureState:{active:captureActive},values:VALUES,watching:!!watcher,bootFailure:null});
 function remoteState(){const session=store.sessions.find(s=>s.id===store.sessionId);return {locale:currentLocale(),appearance:currentAppearance(),camera:Object.fromEntries(['connected','live','model','mode','battery','properties','cameraId','connectedAt','capabilities','saveTo','liveStats','autofocus','focusInfo','error'].map(key=>[key,camera[key]])),cameras:knownCameras,session:{name:session?.name,queueLength:session?.presetQueue?.length||0,count:session?store.photos.filter(p=>p.sessionId===session.id).length:0},presets:store.presets.map(p=>({id:p.id,name:starterPresetLabel(p,'name')})),interval,series,burst,focusPreview:camera.live?null:focusPreview,composition:store.settings.composition,busy:captureActive||!!seriesActive()||accessoryBusy||controlBusy||sessionTransition};}
 function flushDesktopFrame(){if(desktopFrameInFlight||!pendingDesktopFrame||!win||win.isDestroyed())return;const frame=pendingDesktopFrame;pendingDesktopFrame=null;desktopFrameInFlight=true;win.webContents.send('focal:frame',frame);}
 function publishFrame(bytes){remote?.publishFrame(bytes);pendingDesktopFrame=bytes;flushDesktopFrame();}
@@ -153,7 +156,7 @@ function installHandlers(){
     }finally{controlBusy=false;remote?.publishState();}
   };
   const handlers={
-    boot:()=>publicState(),
+    boot:()=>bootApplication(),
     listCameras:async()=>{if(!worker)startWorker();knownCameras=await cameraCommand('listCameras',{sdkDir:store.settings.sdkDir});emit('cameras',knownCameras);return knownCameras;},
     connect:({cameraId}={})=>connectCamera({cameraId}),
     disconnect:()=>{cameraIdle();return call('disconnect');},live:a=>cameraCommand('live',a),property:a=>cameraCommand('property',a),focus:a=>cameraCommand('focus',a),autofocus:()=>{cameraIdle();focusPreview=null;emit('focusPreview',null);return cameraCommand('autofocus',{preview:store.settings.focusPreviewOnSuccess!==false});},
@@ -270,37 +273,33 @@ function installHandlers(){
       return shell.openExternal(url);
     }
   };
-  for(const [name,handler] of Object.entries({...handlers,...desktop}))ipcMain.handle('focal:'+name,async(event,args)=>{if(event.sender!==win.webContents||event.senderFrame!==win.webContents.mainFrame)throw Error('Недопустимый источник.');try{return await handler(args||{});}catch(e){log('error',e.message);throw e;}});
+  for(const [name,handler] of Object.entries({...handlers,...desktop}))ipcMain.handle('focal:'+name,async(event,args)=>{if(event.sender!==win.webContents||event.senderFrame!==win.webContents.mainFrame)throw Error('Недопустимый источник.');if(!['boot','window'].includes(name)&&(!libraryBootstrap?.isReady()||!servicesReady||quitting))throw Error('Library is not ready.');try{return await handler(args||{});}catch(e){log('error',e.message);throw e;}});
   ipcMain.on('focal:frame-ack',event=>{if(event.sender===win.webContents){desktopFrameInFlight=false;flushDesktopFrame();}});
 }
 function cleanEdits(e={}){const number=(key,min,max)=>Math.min(max,Math.max(min,Number(e[key])||0));return {exposure:number('exposure',-3,3),contrast:number('contrast',-75,100),saturation:number('saturation',-100,100),warmth:number('warmth',-100,100),monochrome:!!e.monochrome,rotation:([0,90,180,270].includes(Number(e.rotation))?Number(e.rotation):0)};}
-app.whenReady().then(async()=>{
-  if(process.env.FOCAL_TEST_DATA)app.setPath('userData',process.env.FOCAL_TEST_DATA);
-  storePath=path.join(app.getPath('userData'),'library.json');cacheDir=path.join(app.getPath('userData'),'previews');
-  const id=crypto.randomUUID(),created=new Date().toISOString();
-  const established=await fs.access(storePath).then(()=>true,()=>false);
-  store=await L.loadJSON(storePath,{version:2,sessionId:null,sessions:[],photos:[],settings:{captureFolder:'',watchFolder:'',sdkDir:'',autofocus:true,grid:false,autoSelect:true},presets:[
+function freshLibrary(){return {version:2,sessionId:null,sessions:[],photos:[],settings:{captureFolder:'',watchFolder:'',sdkDir:'',autofocus:true,grid:false,autoSelect:true},presets:[
     {id:'portrait',name:'Мягкий портрет',description:'Открытая диафрагма и спокойный цвет. Режим M, объектив f/1.8.',color:'sage',values:{iso:0x48,shutter:0x75,aperture:0x14,whiteBalance:0,pictureStyle:0x82}},
     {id:'still',name:'Предметная съёмка',description:'Детали и глубина резкости. Режим M, штатив.',color:'sand',values:{iso:0x48,shutter:0x60,aperture:0x38,whiteBalance:1,pictureStyle:0x84}},
     {id:'street',name:'Город в движении',description:'Короткая выдержка для дневных прогулок. Режим M.',color:'blue',values:{iso:0x58,shutter:0x80,aperture:0x30,whiteBalance:0,pictureStyle:0x81}}
-  ]});
-  migrateSessions(store,sessionsRoot());
-  store.settings.language=migrateLanguage(store.settings.language,established);
-  setLocale(currentLocale());
-  store.settings.onboarding=onboardingState(store.settings.onboarding,established);
-  store.settings.composition=normalizeComposition(store.settings.composition,store.settings.grid);store.settings.workspace=normalizeWorkspace(store.settings.workspace);
+  ]};}
+function prepareLibrary(candidate,{established}){
+  migrateSessions(candidate,sessionsRoot());
+  candidate.settings.language=migrateLanguage(candidate.settings.language,established);
+  candidate.settings.onboarding=onboardingState(candidate.settings.onboarding,established);
+  candidate.settings.composition=normalizeComposition(candidate.settings.composition,candidate.settings.grid);candidate.settings.workspace=normalizeWorkspace(candidate.settings.workspace);
   // Upgrade an existing 0.1 library without changing its photos, paths or ratings.
-  if(!['light','dark','system'].includes(store.settings.theme))store.settings.theme=established?'light':'system';
-  store.settings.performanceMode=store.settings.performanceMode===true;
-  if(!/^#[0-9a-f]{6}$/i.test(store.settings.accentColor||''))store.settings.accentColor='#7f9c69';
-  if(!['current','classic','modern'].includes(store.settings.design))store.settings.design='current';
-  if(typeof store.settings.showSplashes!=='boolean')store.settings.showSplashes=true;
-  if(typeof store.settings.focusPreviewOnSuccess!=='boolean')store.settings.focusPreviewOnSuccess=true;
-  if(!store.settings.remotePort)store.settings.remotePort=8765;
-  if(store.settings.captureFolder)await fs.mkdir(store.settings.captureFolder,{recursive:true});
-  await persist();
-  protocol.handle('focal-asset',request=>{const id=new URL(request.url).pathname.slice(1),file=assets.get(id);return file?net.fetch(pathToFileURL(file).toString()):new Response('Not found',{status:404});});
-  shotInspector=createShotInspector({
+  if(!['light','dark','system'].includes(candidate.settings.theme))candidate.settings.theme=established?'light':'system';
+  candidate.settings.performanceMode=candidate.settings.performanceMode===true;
+  if(!/^#[0-9a-f]{6}$/i.test(candidate.settings.accentColor||''))candidate.settings.accentColor='#7f9c69';
+  if(!['current','classic','modern'].includes(candidate.settings.design))candidate.settings.design='current';
+  if(typeof candidate.settings.showSplashes!=='boolean')candidate.settings.showSplashes=true;
+  if(typeof candidate.settings.focusPreviewOnSuccess!=='boolean')candidate.settings.focusPreviewOnSuccess=true;
+  if(!candidate.settings.remotePort)candidate.settings.remotePort=8765;
+  return candidate;
+}
+function ensureReadyServices(){
+  if(servicesReady||quitting)return;
+  if(!shotInspector)shotInspector=createShotInspector({
     latest:()=>store.photos.findLast(p=>p.cameraTransfer===true),
     findPhoto:id=>store.photos.find(p=>p.id===id&&p.cameraTransfer===true),
     appearance:currentAppearance,
@@ -308,10 +307,27 @@ app.whenReady().then(async()=>{
     canRead:()=>!sessionTransition&&!quitting,
     trackRead:job=>{previewTasks.add(job);job.then(()=>previewTasks.delete(job),()=>previewTasks.delete(job));return job;}
   });
+  if(!remote)remote=createRemoteServer({getState:remoteState,command:async(name,args)=>{const result=await commandRoutes[name](args);if(['connect','disconnect','live','property'].includes(name))return remoteState().camera;if(name==='capture')return {captured:true,files:result.files?.map(f=>path.basename(f))};return result;},getPhoto:async id=>{const p=store.photos.find(p=>p.id===id);return p?.thumbPath?fs.readFile(p.thumbPath):null;},log,onClients:info=>{remoteInfo=info.running?{...remoteInfo,...info}:{running:false,clients:0};emit('remote',remoteInfo);}});
+  if(!worker)startWorker();
+  servicesReady=true;
+}
+async function bootApplication(){
+  const failed=kind=>({bootFailure:{kind},locale:currentLocale()});
+  if(quitting)return failed('CANCELLED');
+  const result=await libraryBootstrap.boot();
+  if(quitting)return failed('CANCELLED');
+  if(result.kind!=='VALID')return failed(result.kind);
+  store=result.store;setLocale(currentLocale());
+  try{ensureReadyServices();}catch{return failed('RUNTIME_FAILED');}
+  win.setBackgroundColor(appearanceWindowOptions(currentAppearance()).backgroundColor);
+  return publicState();
+}
+app.whenReady().then(async()=>{
+  storePath=path.join(app.getPath('userData'),'library.json');cacheDir=path.join(app.getPath('userData'),'previews');
+  libraryBootstrap=createLibraryBootstrap({readText:async()=>decodeLibraryBytes(await fs.readFile(storePath)),writeStore:async candidate=>{if(candidate.settings.captureFolder)await fs.mkdir(candidate.settings.captureFolder,{recursive:true});await L.atomicJSON(storePath,candidate);},createFresh:freshLibrary,prepare:prepareLibrary});
+  protocol.handle('focal-asset',request=>{const id=new URL(request.url).pathname.slice(1),file=assets.get(id);return file?net.fetch(pathToFileURL(file).toString()):new Response('Not found',{status:404});});
   installHandlers();
-  remote=createRemoteServer({getState:remoteState,command:async(name,args)=>{const result=await commandRoutes[name](args);if(['connect','disconnect','live','property'].includes(name))return remoteState().camera;if(name==='capture')return {captured:true,files:result.files?.map(f=>path.basename(f))};return result;},getPhoto:async id=>{const p=store.photos.find(p=>p.id===id);return p?.thumbPath?fs.readFile(p.thumbPath):null;},log,onClients:info=>{remoteInfo=info.running?{...remoteInfo,...info}:{running:false,clients:0};emit('remote',remoteInfo);}});
   nativeTheme.on('updated',()=>{emit('appearance',currentAppearance());remote?.publishState();shotInspector?.publish();});
-  startWorker();
   const {backgroundColor,additionalArguments}=appearanceWindowOptions(currentAppearance());
   win=new BrowserWindow({width:1480,height:960,minWidth:1024,minHeight:720,frame:false,backgroundColor,title:'Apertrove',icon:path.join(__dirname,'..','assets','icon.png'),show:false,webPreferences:{preload:path.join(__dirname,'preload.cjs'),additionalArguments:[...additionalArguments,'--apertrove-locale='+currentLocale()],contextIsolation:true,nodeIntegration:false,sandbox:true,webSecurity:true,backgroundThrottling:false}});
   win.webContents.setWindowOpenHandler(()=>({action:'deny'}));win.webContents.on('will-navigate',e=>e.preventDefault());
@@ -320,7 +336,7 @@ app.whenReady().then(async()=>{
   win.webContents.on('did-finish-load',publishVisibility);
   win.once('ready-to-show',()=>win.show());
   win.on('closed',()=>shotInspector?.close());
+  win.on('close',e=>{if(quitting){e.preventDefault();return;}e.preventDefault();quitting=true;libraryBootstrap.dispose();stopInterval();if(seriesActive())series.cancelled=true;(async()=>{await remote?.stop();await watcher?.close();if(burstActive())await call('burstStop').catch(()=>{});if(seriesActive()||burstActive()||accessoryBusy||controlBusy||sessionTransition){while(seriesActive()||burstActive()||accessoryBusy||controlBusy||sessionTransition)await new Promise(r=>setTimeout(r,100));}await importQueue.catch(()=>{});if(worker)await Promise.race([call('shutdown').catch(()=>{}),new Promise(r=>setTimeout(r,2500))]);worker?.kill();if(libraryBootstrap.isReady())await persist();win.destroy();app.quit();})();});
   if(process.env.FOCAL_DEV_URL)await win.loadURL(process.env.FOCAL_DEV_URL);else await win.loadFile(path.join(__dirname,'..','dist','index.html'));
-  win.on('close',e=>{if(quitting){e.preventDefault();return;}e.preventDefault();quitting=true;stopInterval();if(seriesActive())series.cancelled=true;(async()=>{await remote?.stop();await watcher?.close();if(burstActive())await call('burstStop').catch(()=>{});if(seriesActive()||burstActive()||accessoryBusy||controlBusy||sessionTransition){while(seriesActive()||burstActive()||accessoryBusy||controlBusy||sessionTransition)await new Promise(r=>setTimeout(r,100));}await importQueue.catch(()=>{});if(worker)await Promise.race([call('shutdown').catch(()=>{}),new Promise(r=>setTimeout(r,2500))]);worker?.kill();await persist();win.destroy();app.quit();})();});
 });
 app.on('window-all-closed',()=>app.quit());
