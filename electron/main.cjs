@@ -31,6 +31,9 @@ const {createPhotoImporter}=require('./photo-import.cjs');
 const {createProtectedExport}=require('./protected-export.cjs');
 const {createExportService}=require('./export-service.cjs');
 const {previousPath}=require('./library-recovery.cjs');
+const {createOperationClient}=require('./operation-lifecycle.cjs');
+const {createTransferConsumer}=require('./transfer-consumer.cjs');
+const {createShutdownCoordinator}=require('./shutdown-coordinator.cjs');
 const metadataCache=new Map();
 const previewTasks=new Set();
 app.setName('Apertrove');
@@ -46,20 +49,24 @@ let win,worker,store,storePath,cacheDir,watcher,interval=null,sequence=0,quittin
 let shotInspector;
 let libraryBootstrap,servicesReady=false;
 let remote,remoteInfo={running:false,clients:0},commandRoutes,knownCameras=[],remoteStateTimer,desktopFrameInFlight=false,pendingDesktopFrame=null;
-let importQueue=Promise.resolve();const pending=new Map(),assets=new Map();
+let importQueue=Promise.resolve(),workerState=null;const assets=new Map(),applicationTasks=new Set(),workerChannels=new Set();
+let consumerRevision=0,importFailures=0;
+const lifecycleIssues=new Set();let diagnosticTail=Promise.resolve();
+function lifecycleIssue(code){if(lifecycleIssues.size<32)lifecycleIssues.add(code);}
 let burst=null,series=null,sessionTransition=false,captureMetadata=null,focusPreview=null,accessoryBusy=false,controlBusy=false;
 const burstActive=()=>burst&&['holding','transferring'].includes(burst.status);
 const seriesActive=()=>series&&['running','stopping','restoring'].includes(series.status);
 function requireSession(){if(!store.sessions.some(s=>s.id===store.sessionId))throw Error('Создайте или откройте фотосессию.');}
-function cameraIdle(){if(quitting||seriesActive()||burstActive()||interval||captureActive||sessionTransition||accessoryBusy||controlBusy)throw Error('Дождитесь окончания текущей команды камеры.');}
+function nativeOwned(){return !!workerState&&!workerState.exited&&(workerState.rpc.hasOutstanding()||!workerState.rpc.snapshot().admissionOpen);}
+function cameraIdle(){if(quitting||nativeOwned()||seriesActive()||burstActive()||interval||captureActive||sessionTransition||accessoryBusy||controlBusy)throw Error('Дождитесь окончания текущей команды камеры.');}
 async function cameraCommand(method,args){cameraIdle();controlBusy=true;remote?.publishState();try{return await call(method,args);}finally{controlBusy=false;remote?.publishState();}}
-function sessionIdle(allowWatcher=false){if(accessoryBusy||controlBusy||seriesActive()||burstActive()||interval||captureActive||watcher&&!allowWatcher||sessionTransition)throw Error('Остановите текущую съёмку и автоимпорт перед сменой фотосессии.');}
+function sessionIdle(allowWatcher=false){if(quitting||nativeOwned()||accessoryBusy||controlBusy||seriesActive()||burstActive()||interval||captureActive||watcher&&!allowWatcher||sessionTransition)throw Error('Остановите текущую съёмку и автоимпорт перед сменой фотосессии.');}
 const sessionsRoot=()=>path.join(process.env.FOCAL_TEST_DATA?path.join(process.env.FOCAL_TEST_DATA,'Pictures'):app.getPath('pictures'),'Apertrove');
 const {languages, supportedLocales, resolve: resolveLocale, migrate: migrateLanguage, register, setLocale, legacy:ltext, t, starterPresetLabel}=require('./i18n/runtime.js');
 for(const locale of supportedLocales)register(locale,require('./i18n/locales/'+locale+'.json'));
 const currentLocale=()=>resolveLocale(store?.settings.language||'system',app.getPreferredSystemLanguages());
 const currentAppearance=()=>normalizeAppearance(store?.settings||{},nativeTheme.shouldUseDarkColors);
-const emit=(type,data)=>{if((type==='settings'||type==='appearance')&&win&&!win.isDestroyed())win.setBackgroundColor(appearanceWindowOptions(currentAppearance()).backgroundColor);if(win&&!win.isDestroyed())win.webContents.send('focal:event',{type,data,...(type==='settings'?{appearance:currentAppearance(),locale:currentLocale()}: {})});if(type==='photo'&&data.cameraTransfer)shotInspector?.photoChanged();if(type==='settings')shotInspector?.publish();if(remote&&['camera','photo','photoUpdated','settings','state','presets','interval','series','burst','captureState','cameras','focusPreview'].includes(type)){clearTimeout(remoteStateTimer);remoteStateTimer=setTimeout(()=>remote.publishState(),30);}};
+const emit=(type,data)=>{if(quitting&&['photo','photoUpdated','burst','series','interval'].includes(type))return;if((type==='settings'||type==='appearance')&&win&&!win.isDestroyed())win.setBackgroundColor(appearanceWindowOptions(currentAppearance()).backgroundColor);if(win&&!win.isDestroyed())win.webContents.send('focal:event',{type,data,...(type==='settings'?{appearance:currentAppearance(),locale:currentLocale()}: {})});if(type==='photo'&&data.cameraTransfer)shotInspector?.photoChanged();if(type==='settings')shotInspector?.publish();if(remote&&['camera','photo','photoUpdated','settings','state','presets','interval','series','burst','captureState','operationState','cameras','focusPreview'].includes(type)){clearTimeout(remoteStateTimer);remoteStateTimer=setTimeout(()=>remote.publishState(),30);}};
 const log=(level,message)=>{const entry={level,message,time:new Date().toISOString()};logs=[...logs.slice(-199),entry];emit('log',entry);};
 const commits=createLibraryCommitter({getStore:()=>store,writeSnapshot:snapshot=>writeLibraryStore(storePath,snapshot),isReady:()=>!!libraryBootstrap?.isReady()});
 const exporter=createProtectedExport({getRegistry:()=>({files:[...store.photos.map(photo=>photo.path),storePath,previousPath(storePath)],directories:[path.dirname(storePath)]}),serialize:operation=>commits.runExclusive(operation)});
@@ -70,17 +77,40 @@ function exportTask(operation){if(sessionTransition)throw Error('Дождите�
 function photo(id){const p=store.photos.find(p=>p.id===id);if(!p)throw Error('Снимок не найден.');return p;}
 function asset(file){if(!file)return null;const id=crypto.createHash('sha256').update(file).digest('hex');assets.set(id,file);return `focal-asset://image/${id}`;}
 function publicPhoto(p){return {...p,thumb:asset(p.thumbPath),preview:asset(p.previewPath)};}
-const publicState=()=>({...store,locale:currentLocale(),appearance:currentAppearance(),showOnboarding:!store.settings.onboarding.completed&&(!process.env.FOCAL_TEST_DATA||process.env.FOCAL_TEST_ONBOARDING==='1'),photos:store.photos.map(publicPhoto),camera,cameras:knownCameras,remote:remoteInfo,interfaces:localInterfaces(),logs,interval,series,burst,focusPreview,captureState:{active:captureActive},values:VALUES,watching:!!watcher,bootFailure:null});
-function remoteState(){const session=store.sessions.find(s=>s.id===store.sessionId);return {locale:currentLocale(),appearance:currentAppearance(),camera:Object.fromEntries(['connected','live','model','mode','battery','properties','cameraId','connectedAt','capabilities','saveTo','liveStats','autofocus','focusInfo','error'].map(key=>[key,camera[key]])),cameras:knownCameras,session:{name:session?.name,queueLength:session?.presetQueue?.length||0,count:session?store.photos.filter(p=>p.sessionId===session.id).length:0},presets:store.presets.map(p=>({id:p.id,name:starterPresetLabel(p,'name')})),interval,series,burst,focusPreview:camera.live?null:focusPreview,composition:store.settings.composition,busy:captureActive||!!seriesActive()||accessoryBusy||controlBusy||sessionTransition};}
+const operationState=()=>({busy:nativeOwned(),ledger:workerState?.rpc.snapshot()||null});
+const publicState=()=>({...store,locale:currentLocale(),appearance:currentAppearance(),showOnboarding:!store.settings.onboarding.completed&&(!process.env.FOCAL_TEST_DATA||process.env.FOCAL_TEST_ONBOARDING==='1'),photos:store.photos.map(publicPhoto),camera,cameras:knownCameras,remote:remoteInfo,interfaces:localInterfaces(),logs,interval,series,burst,focusPreview,captureState:{active:captureActive},operationState:operationState(),values:VALUES,watching:!!watcher,bootFailure:null});
+function remoteState(){const session=store.sessions.find(s=>s.id===store.sessionId);return {locale:currentLocale(),appearance:currentAppearance(),camera:Object.fromEntries(['connected','live','model','mode','battery','properties','cameraId','connectedAt','capabilities','saveTo','liveStats','autofocus','focusInfo','error'].map(key=>[key,camera[key]])),cameras:knownCameras,session:{name:session?.name,queueLength:session?.presetQueue?.length||0,count:session?store.photos.filter(p=>p.sessionId===session.id).length:0},presets:store.presets.map(p=>({id:p.id,name:starterPresetLabel(p,'name')})),interval,series,burst,focusPreview:camera.live?null:focusPreview,composition:store.settings.composition,busy:nativeOwned()||captureActive||!!seriesActive()||accessoryBusy||controlBusy||sessionTransition};}
 function flushDesktopFrame(){if(desktopFrameInFlight||!pendingDesktopFrame||!win||win.isDestroyed())return;const frame=pendingDesktopFrame;pendingDesktopFrame=null;desktopFrameInFlight=true;win.webContents.send('focal:frame',frame);}
 function publishFrame(bytes){remote?.publishFrame(bytes);pendingDesktopFrame=bytes;flushDesktopFrame();}
-function call(method,args={}){if(!worker)return Promise.reject(Error('Модуль камеры не запущен.'));const id=++sequence;return new Promise((resolve,reject)=>{const timeout=setTimeout(()=>{pending.delete(id);reject(Error('Модуль камеры не ответил вовремя.'));},method==='capture'?(camera.properties.driveMode?.value===7?920000:85000):method==='importCard'?180000:['autofocus','focus'].includes(method)?30000:20000);pending.set(id,{resolve,reject,timeout});worker.postMessage({id,method,args});});}
+function trackApplication(value){const job=Promise.resolve(value);applicationTasks.add(job);job.then(()=>applicationTasks.delete(job),()=>applicationTasks.delete(job));return job;}
+function transferRoute(destination=store.settings.captureFolder,sessionId=store.sessionId){return {sessionId,destination};}
+function call(method,args={},options={}){
+  if(!workerState||workerState.exited)return Promise.reject(Error('Модуль камеры не запущен.'));
+  const timeoutMs=options.timeoutMs??(method==='capture'?(camera.properties.driveMode?.value===7?920000:85000):method==='importCard'?180000:['autofocus','focus'].includes(method)?30000:20000);
+  if(['connect','destination','capture','importCard'].includes(method)&&!args.route)args={...args,route:transferRoute(args.folder??store.settings.captureFolder)};
+  return workerState.rpc.call(method,args,{timeoutMs}).catch(error=>{
+    const key=error.code==='OPERATION_TIMEOUT'?'operation.timeout_draining':error.code==='OPERATION_BUSY'?'operation.busy':error.code==='OPERATION_STALE_SESSION'?'operation.stale':error.code==='OPERATION_UNKNOWN_TERMINATION'?'operation.unknown':error.code==='OPERATION_ADMISSION_CLOSED'?'operation.closed':null;
+    if(key)error.message=t(key);throw error;
+  });
+}
 function stopInterval(reason){if(interval){interval.cancelled=true;interval=null;emit('interval',null);if(reason)log('info',reason);}}
 function startWorker(){
-  worker=utilityProcess.fork(path.join(__dirname,'camera-worker.cjs'),[],{serviceName:'Apertrove Camera',stdio:'pipe'});
-  worker.stdout?.on('data',d=>log('info',String(d).trim()));worker.stderr?.on('data',d=>log('error',String(d).trim()));
-  worker.on('message',m=>{
-    if(m.id){const p=pending.get(m.id);if(p){clearTimeout(p.timeout);pending.delete(m.id);m.error?p.reject(Error(m.error)):p.resolve(m.result);}return;}
+  if(quitting)throw Error(t('operation.closed'));
+  if(workerChannels.size>=16)throw Error(t('operation.unknown'));
+  const generation=crypto.randomUUID(),source=utilityProcess.fork(path.join(__dirname,'camera-worker.cjs'),['--apertrove-generation='+generation],{serviceName:'Apertrove Camera',stdio:'pipe',env:{...process.env,APERTROVE_RECOVERY_DESTINATION:path.join(app.getPath('userData'),'unattributed-transfers')}});
+  let exited;const channel={generation,process:source,nativeEpoch:0,exited:false,exitPromise:new Promise(resolve=>{exited=resolve;})};
+  channel.rpc=createOperationClient({generation,send:message=>source.postMessage(message),getSessionEpoch:()=>channel.nativeEpoch,onChange:()=>emit('operationState',operationState())});
+  channel.consumer=createTransferConsumer({generation,register:(file,context,cameraTransfer)=>queueImport([file],false,cameraTransfer,{sessionId:context.sessionId,dest:context.destination,transfer:context}),onIssue:code=>{lifecycleIssue(code);log('error',t('operation.transfer_issue'));}});
+  worker=source;workerState=channel;workerChannels.add(channel);
+  source.stdout?.on('data',d=>log('info',String(d).trim()));source.stderr?.on('data',d=>log('error',String(d).trim()));
+  source.on('message',m=>{
+    if(!m)return;if(m.generation!==generation){if(m.event==='photo')void channel.consumer.accept(m);return;}
+    if(m.type==='operation'){const accepted=channel.rpc.receive(m);if(accepted&&Number.isSafeInteger(m.nativeSessionEpoch))channel.nativeEpoch=Math.max(channel.nativeEpoch,m.nativeSessionEpoch);return;}
+    // A late saved file remains accounted for even if its session/worker is old.
+    if(m.event==='photo'){void channel.consumer.accept(m);return;}
+    if(m.event==='nativeObservation'||m.event==='transferIssue'){channel.issue=true;lifecycleIssue(m.event==='nativeObservation'?'NATIVE_RESULT_UNKNOWN':'TRANSFER_RESULT_UNKNOWN');log('error',t('operation.transfer_issue'));return;}
+    if(source!==worker||!Number.isSafeInteger(m.sessionEpoch)||m.sessionEpoch<channel.nativeEpoch)return;
+    channel.nativeEpoch=m.sessionEpoch;
     if(m.event==='status'){camera=m.data;if(!camera.connected&&!accessoryBusy&&focusPreview){focusPreview=null;emit('focusPreview',null);}emit('camera',camera);if(!camera.connected&&seriesActive())series.cancelled=true;if(!camera.connected)stopInterval('Интервальная съёмка остановлена: камера отключена.');}
     else if(m.event==='burstReleased'){if(burstActive()){burst.status='transferring';emit('burst',{...burst});}}
     else if(m.event==='burstProgress'){if(burstActive()){burst.shots=m.data.shots;emit('burst',{...burst});}}
@@ -88,26 +118,34 @@ function startWorker(){
     else if(m.event==='focusPreview'){const bytes=Buffer.from(m.data.bytes);focusPreview={image:`data:image/jpeg;base64,${bytes.toString('base64')}`,at:m.data.at,focusInfo:m.data.focusInfo};emit('focusPreview',focusPreview);remote?.publishState();}
     else if(m.event==='frame'){const bytes=Buffer.isBuffer(m.data)?m.data:Buffer.from(m.data.buffer,m.data.byteOffset,m.data.byteLength);publishFrame(bytes);}
     else if(m.event==='log')log(m.data.level,m.data.message);
-    else if(m.event==='photo')queueImport([m.data.path],false,m.data.capture===true).catch(e=>log('error',e.message));
   });
-  worker.on('exit',code=>{worker=null;for(const p of pending.values()){clearTimeout(p.timeout);p.reject(Error('Модуль камеры завершил работу. Повторите подключение.'));}pending.clear();camera={connected:false,properties:{},error:code?'Модуль камеры был перезапущен.':null};emit('camera',camera);stopInterval();if(!quitting&&code)log('error',`Модуль камеры завершился с кодом ${code}.`);});
+  source.on('exit',code=>{channel.exited=true;channel.exitCode=code;channel.rpc.terminate();exited(code);if(!channel.finalizing){lifecycleIssue('WORKER_EXIT_UNFENCED');void writeLifecycleDiagnostic({outcome:'UNKNOWN_TERMINATION',phase:'WORKER_EXIT'}).catch(()=>{});}if(worker!==source)return;worker=null;camera={connected:false,properties:{},error:code?'Модуль камеры был перезапущен.':null};emit('camera',camera);emit('operationState',operationState());stopInterval();if(!quitting&&code)log('error',t('operation.unknown'));});
 }
 async function addFiles(files,copy=true,context){
   return importer.addFiles(files,copy,context);
 }
-function queueImport(files,copy=true,cameraTransfer=false){const context={sessionId:store.sessionId,dest:store.settings.captureFolder,equipment:{camera:camera.model,lens:camera.equipment?.lensName},series:captureMetadata?.seriesId?captureMetadata:null,burst:captureMetadata?.burstId,cameraTransfer};const job=importQueue.catch(()=>{}).then(()=>addFiles(files,copy,context));importQueue=job;return job;}
-async function capture(args={},metadata=null){
+function queueImport(files,copy=true,cameraTransfer=false,explicitContext){
+  const context=JSON.parse(JSON.stringify(explicitContext?{...explicitContext,cameraTransfer}:{sessionId:store.sessionId,dest:store.settings.captureFolder,equipment:{camera:camera.model,lens:camera.equipment?.lensName},cameraTransfer}));
+  consumerRevision++;const job=importQueue.catch(()=>{}).then(()=>addFiles(files,copy,context));importQueue=job;
+  job.then(result=>{if(result.errors?.length)importFailures++;},()=>{importFailures++;});return job;
+}
+function capture(args={},metadata=null){return trackApplication(captureOnce(args,metadata));}
+async function captureOnce(args={},metadata=null){
+  if(quitting)throw Error(t('operation.closed'));
   requireSession();if(!store.settings.captureFolder)throw Error('Выберите папку съёмки.');if(captureActive)throw Error('Предыдущий кадр ещё сохраняется.');
   captureActive=true;captureMetadata=metadata;emit('captureState',{active:true});
   try{
-    const result=await call('capture',{autofocus:store.settings.autofocus,folder:store.settings.captureFolder,...args});
-    store.equipmentStats??={};for(const key of [`camera:${camera.model}`,`lens:${camera.equipment?.lensName}`])store.equipmentStats[key]=(store.equipmentStats[key]||0)+(result.shots||1);
+    const source=workerState,result=await call('capture',{autofocus:store.settings.autofocus,folder:store.settings.captureFolder,...args,captureId:crypto.randomUUID(),route:transferRoute()});
+    await source.consumer.drain();
+    if(source.consumer.snapshot().issues.includes('TRANSFER_REGISTRATION_FAILED'))throw Error(t('operation.transfer_issue'));
+    if(result.confirmation==='CONFIRMED'){store.equipmentStats??={};for(const key of [`camera:${camera.model}`,`lens:${camera.equipment?.lensName}`])store.equipmentStats[key]=(store.equipmentStats[key]||0)+(result.shots||0);}
+    else log('info',t('operation.capture_unverified'));
     const session=store.sessions.find(s=>s.id===store.sessionId);if(session)session.updated=new Date().toISOString();await persist();return result;
   }finally{captureMetadata=null;captureActive=false;emit('captureState',{active:false});}
 }
 async function activateSession(target,destinationReady=false){
   await fs.mkdir(target.captureFolder,{recursive:true});
-  if(camera.connected&&!destinationReady)await call('destination',{folder:target.captureFolder});
+  if(camera.connected&&!destinationReady)await call('destination',{folder:target.captureFolder,route:transferRoute(target.captureFolder,target.id)});
   store.sessionId=target.id;store.settings.captureFolder=target.captureFolder;store.settings.autofocus=target.autofocus!==false;store.settings.composition=normalizeComposition(target.composition,target.grid);store.settings.grid=store.settings.composition.grid!=='off';
   target.updated=new Date().toISOString();await persist();emit('state',publicState());return publicState();
 }
@@ -120,7 +158,7 @@ async function startSeries({ids}={}){
   const plan=prepareSeries(queue,store.presets,current);const currentAutofocus=store.settings.autofocus;
   series={id:crypto.randomUUID(),status:'running',startedAt:new Date().toISOString(),phase:'preparing',done:0,count:plan.steps.length,index:0,current:'',cancelled:false,restoreErrors:[]};
   emit('series',{...series});
-  runSeries(plan,{property:args=>call('property',args),capture:metadata=>capture({autofocus:currentAutofocus},metadata),waitImports:()=>importQueue,progress:seriesProgress},series).then(job=>log(job.status==='completed'?'success':job.status==='cancelled'?'info':'error',job.error||`Серия пресетов: ${job.done} из ${job.count}. Исходные параметры восстановлены.`)).catch(e=>{series={...series,status:'failed',error:e.message};emit('series',series);log('error',e.message);});
+  trackApplication(runSeries(plan,{property:args=>call('property',args),capture:metadata=>capture({autofocus:currentAutofocus},metadata),waitImports:()=>importQueue,progress:seriesProgress},series).then(job=>log(job.status==='completed'?'success':job.status==='unconfirmed'||job.status==='cancelled'?'info':'error',job.status==='unconfirmed'?t('operation.capture_unverified'):job.error||`Серия пресетов: ${job.done} из ${job.count}. Исходные параметры восстановлены.`)).catch(e=>{series={...series,status:'failed',error:e.message};emit('series',series);log('error',e.message);}));
   return {...series};
 }
 
@@ -146,6 +184,7 @@ function installHandlers(){
       const selected=cameraId||knownCameras.find(c=>c.id===store.settings.preferredCameraId)?.id;
       const entry=knownCameras.find(c=>c.id===selected)||(knownCameras.length===1?knownCameras[0]:null);
       if(entry&&camera.connected&&camera.cameraId!==entry.id)await call('disconnect');
+      if(quitting)throw Error(t('operation.closed'));
       if(entry&&!camera.connected&&!readOnly)await flashBridge.probe(entry.model,{force:true});
       if(quitting)throw Error('Приложение закрывается.');
       const result=await call('connect',{sdkDir:store.settings.sdkDir,folder:store.settings.captureFolder,cameraId:selected,
@@ -180,11 +219,11 @@ function installHandlers(){
     reveal:({id})=>{if(id)shell.showItemInFolder(photo(id).path);else if(store.settings.captureFolder)shell.openPath(store.settings.captureFolder);return true;},
     savePreset:async p=>{const clean=validatePreset(p);store.presets=store.presets.filter(v=>v.id!==clean.id).concat(clean);await persist();emit('presets',store.presets);return clean;},
     deletePreset:async({id})=>{store.presets=store.presets.filter(p=>p.id!==id);await persist();emit('presets',store.presets);return true;},
-    applyPreset:async({id})=>{cameraIdle();const preset=store.presets.find(p=>p.id===id);if(!preset)throw Error('Пресет не найден.');const applied=[],failed=[];for(const [key,value] of Object.entries(preset.values)){try{await call('property',{key,value});applied.push(key);}catch{failed.push(key);}}if(failed.length)throw Error(`Применено ${applied.length} параметров. Недоступны: ${failed.join(', ')}.`);return {applied:applied.length};},
+    applyPreset:async({id})=>{cameraIdle();const preset=store.presets.find(p=>p.id===id);if(!preset)throw Error('Пресет не найден.');controlBusy=true;try{const applied=[],failed=[];for(const [key,value] of Object.entries(preset.values)){try{await call('property',{key,value});applied.push(key);}catch(error){failed.push(key);if(['OPERATION_TIMEOUT','OPERATION_UNKNOWN_TERMINATION','OPERATION_BUSY'].includes(error.code))break;}}if(failed.length)throw Error(`Применено ${applied.length} параметров. Недоступны: ${failed.join(', ')}.`);return {applied:applied.length};}finally{controlBusy=false;remote?.publishState();}},
     exportPresets:()=>exportTask(()=>exportsService.exportPresets()),
     importPresets:async()=>{const file=await choose(['openFile'],'Выберите JSON с пресетами');if(!file)return null;const stat=await fs.stat(file);if(stat.size>1024*1024)throw Error('Файл пресетов слишком большой.');const json=JSON.parse(await fs.readFile(file,'utf8'));if(json.version!==1||!Array.isArray(json.presets)||json.presets.length>200)throw Error('Неизвестный формат пресетов.');const items=json.presets.map(p=>validatePreset({...p,id:crypto.randomUUID()}));store.presets.push(...items);await persist();emit('presets',store.presets);return items.length;},
     settings:async a=>{if(a.language!==undefined&&!languages.includes(a.language))throw Error(t('language.invalid'));if(a.design!==undefined&&!['current','classic','modern'].includes(a.design))throw Error('Неизвестное оформление.');if(a.theme!==undefined&&!['light','dark','system'].includes(a.theme))throw Error('Неизвестная тема.');if(a.accentColor!==undefined&&!/^#[0-9a-f]{6}$/i.test(a.accentColor))throw Error('Укажите цвет в формате #RRGGBB.');if(a.remotePort!==undefined&&(!Number.isInteger(Number(a.remotePort))||Number(a.remotePort)<1024||Number(a.remotePort)>65535))throw Error('Порт должен быть от 1024 до 65535.');if(a.remoteHost!==undefined&&!localInterfaces().some(i=>i.address===a.remoteHost))throw Error('Выберите локальный сетевой интерфейс.');if(a.performanceMode!==undefined&&typeof a.performanceMode!=='boolean')throw Error('Некорректный режим производительности.');if(a.focusPreviewOnSuccess!==undefined&&typeof a.focusPreviewOnSuccess!=='boolean')throw Error('Некорректная настройка превью AF.');if(a.focusPreviewOnSuccess===false){focusPreview=null;emit('focusPreview',null);}if(a.language!==undefined){store.settings.language=a.language;setLocale(currentLocale());}if(a.design!==undefined)store.settings.design=a.design;for(const key of ['autofocus','focusPreviewOnSuccess','grid','autoSelect','showSplashes','setupSessionSubfolder','performanceMode'])if(typeof a[key]==='boolean')store.settings[key]=a[key];if(a.theme!==undefined)store.settings.theme=a.theme;if(a.accentColor!==undefined)store.settings.accentColor=a.accentColor.toLowerCase();if(a.remotePort!==undefined)store.settings.remotePort=Number(a.remotePort);if(a.remoteHost!==undefined)store.settings.remoteHost=a.remoteHost;if(a.workspace!==undefined)store.settings.workspace=normalizeWorkspace({...store.settings.workspace,...a.workspace,panels:{...store.settings.workspace?.panels,...a.workspace?.panels}});if(a.composition!==undefined)store.settings.composition=normalizeComposition({...store.settings.composition,...a.composition,margins:{...store.settings.composition?.margins,...a.composition?.margins}});if(a.grid!==undefined)store.settings.composition=normalizeComposition({...store.settings.composition,grid:a.grid?'thirds':'off'});store.settings.grid=store.settings.composition.grid!=='off';const activeSession=store.sessions.find(s=>s.id===store.sessionId);if(activeSession){if(a.autofocus!==undefined)activeSession.autofocus=store.settings.autofocus;if(a.grid!==undefined||a.composition!==undefined){activeSession.grid=store.settings.grid;activeSession.composition=store.settings.composition;}}await persist();emit('settings',store.settings);return store.settings;},
-    remoteStart:async({host,port}={})=>{const info=await remote.start({host:host||store.settings.remoteHost||localInterfaces()[0].address,port:port??store.settings.remotePort??8765});remoteInfo={...info,qr:await QRCode.toDataURL(info.url,{width:280,margin:2,errorCorrectionLevel:'M'})};store.settings.remoteHost=info.host;store.settings.remotePort=info.port;await persist();emit('settings',store.settings);emit('remote',remoteInfo);return remoteInfo;},
+    remoteStart:async({host,port}={})=>{const info=await remote.start({host:host||store.settings.remoteHost||localInterfaces()[0].address,port:port??store.settings.remotePort??8765});if(quitting){await remote.stop();throw Error(t('operation.closed'));}const qr=await QRCode.toDataURL(info.url,{width:280,margin:2,errorCorrectionLevel:'M'});if(quitting){await remote.stop();throw Error(t('operation.closed'));}remoteInfo={...info,qr};store.settings.remoteHost=info.host;store.settings.remotePort=info.port;await persist();emit('settings',store.settings);emit('remote',remoteInfo);return remoteInfo;},
     remoteStop:async()=>{await remote.stop();remoteInfo={running:false,clients:0};emit('remote',remoteInfo);return remoteInfo;},
     copyRemoteLink:()=>{if(!remoteInfo.running)throw Error('Сначала включите веб-пульт.');clipboard.writeText(remoteInfo.url);return true;},
     openRemote:()=>{if(!remoteInfo.running)throw Error('Сначала включите веб-пульт.');shell.openExternal(remoteInfo.url);return true;},
@@ -192,7 +231,7 @@ function installHandlers(){
       const clean=cleanSession(a);const base=a.folder||store.settings.onboarding.workspace?.folder||sessionsRoot();let folder=base;
       if(a.createSubfolder!==false){const date=new Intl.DateTimeFormat('sv-SE').format(new Date());folder=await L.uniquePath(base,`${date} ${clean.name}`);}
       await fs.mkdir(folder,{recursive:true});const entry=newSession(clean,folder);
-      if(camera.connected)await call('destination',{folder});store.sessions.push(entry);return activateSession(entry,true);
+      if(camera.connected)await call('destination',{folder,route:transferRoute(folder,entry.id)});store.sessions.push(entry);return activateSession(entry,true);
     }),
     sessionOpen:({id})=>sessionAction(async()=>{const entry=store.sessions.find(s=>s.id===id);if(!entry)throw Error('Фотосессия не найдена.');return activateSession(entry);}),
     sessionUpdate:a=>sessionAction(async()=>{const entry=store.sessions.find(s=>s.id===a.id);if(!entry)throw Error('Фотосессия не найдена.');const clean=cleanSession({...entry,...a});const folder=a.folder||entry.captureFolder;await fs.mkdir(folder,{recursive:true});if(entry.id===store.sessionId&&camera.connected)await call('destination',{folder});Object.assign(entry,clean,{captureFolder:folder,updated:new Date().toISOString()});if(entry.id===store.sessionId)return activateSession(entry,true);await persist();emit('state',publicState());return publicState();}),
@@ -201,7 +240,7 @@ function installHandlers(){
       const active=store.sessionId===entry.id;
       const imageCache=a.deletePhotos===true?sharp.cache():null;
       try{
-        if(active&&camera.connected)await call('destination',{folder:''});
+        if(active&&camera.connected)await call('destination',{folder:'',route:transferRoute('',null)});
         await importQueue.catch(()=>{});
         // Cached libvips operations retain Windows file handles even with files: 0.
         if(imageCache)sharp.cache(false);
@@ -217,19 +256,19 @@ function installHandlers(){
     chooseSessionFolder:()=>choose(['openDirectory','createDirectory'],'Папка фотосессии'),
     seriesQueue:async({ids})=>{cameraIdle();requireSession();if(!Array.isArray(ids)||ids.length>100||ids.some(id=>typeof id!=='string'||id.length>128))throw Error('Некорректная очередь пресетов.');store.sessions.find(s=>s.id===store.sessionId).presetQueue=[...ids];await persist();emit('state',publicState());return ids;},
     seriesStart:startSeries,
-    burstStart:({seconds=5}={})=>{cameraIdle();requireSession();if(captureActive)throw Error('Камера занята.');if(![1,4,5].includes(camera.properties.driveMode?.value))throw Error('Выберите серийный режим камеры.');seconds=Number(seconds);if(!Number.isFinite(seconds)||seconds<.1||seconds>5)throw Error('Удержание: от 0.1 до 5 секунд.');burst={id:crypto.randomUUID(),status:'holding',shots:0,seconds,startedAt:Date.now()};emit('burst',{...burst});capture({burstMs:Math.round(seconds*1000)},{burstId:burst.id}).then(async result=>{await importQueue;burst={...burst,status:'completed',shots:result.shots||1};emit('burst',burst);}).catch(error=>{burst={...burst,status:'failed',error:error.message};emit('burst',burst);log('error',error.message);});return {...burst};},
-    burstStop:async()=>{if(burstActive()){burst.status='transferring';emit('burst',{...burst});await call('burstStop');}return burst;},
+    burstStart:({seconds=5}={})=>{cameraIdle();requireSession();if(captureActive)throw Error('Камера занята.');if(![1,4,5].includes(camera.properties.driveMode?.value))throw Error('Выберите серийный режим камеры.');seconds=Number(seconds);if(!Number.isFinite(seconds)||seconds<.1||seconds>5)throw Error('Удержание: от 0.1 до 5 секунд.');burst={id:crypto.randomUUID(),status:'holding',shots:0,seconds,startedAt:Date.now()};emit('burst',{...burst});trackApplication(capture({burstMs:Math.round(seconds*1000)},{burstId:burst.id}).then(async result=>{await importQueue;burst={...burst,status:result.confirmation==='CONFIRMED'?'completed':'unconfirmed',shots:result.confirmation==='CONFIRMED'?result.shots:0,observedTransfers:result.observedTransfers||0};emit('burst',burst);}).catch(error=>{burst={...burst,status:'failed',error:error.message};emit('burst',burst);log('error',error.message);}));return {...burst};},
+    burstStop:async()=>{if(burstActive()){burst.status='transferring';emit('burst',{...burst});}if(worker)await call('burstStop');return burst;},
     seriesStop:()=>{if(seriesActive()){series.cancelled=true;series.status='stopping';emit('series',{...series});}return true;},
     equipment:async()=>{if(camera.connected&&!captureActive&&!seriesActive()&&!burstActive())await call('status');return equipmentCards(camera,store);},
     equipmentPhoto:async({kind})=>{if(!['camera','lens'].includes(kind))throw Error('Неизвестный тип оборудования.');const name=kind==='camera'?camera.model:camera.equipment?.lensName;const media=await productMedia(kind,name,cacheDir);return {...media,image:asset(media.image)};},
     equipmentSource:({kind})=>{const name=kind==='camera'?camera.model:camera.equipment?.lensName;const info=identify(kind,name);if(info.source)shell.openExternal(info.source);return !!info.source;},
-    watch:async({enabled})=>{if(sessionTransition)throw Error('Дождитесь окончания операции с фотосессией.');if(enabled)requireSession();if(watcher){await watcher.close();watcher=null;}if(enabled){const dir=store.settings.watchFolder;if(!dir)throw Error('Сначала выберите входящую папку.');const source=path.resolve(dir).toLowerCase(),target=path.resolve(store.settings.captureFolder).toLowerCase();if(source===target||source.startsWith(target+path.sep)||target.startsWith(source+path.sep))throw Error('Входящая папка и папка съёмки должны быть раздельными и не вложенными друг в друга.');watcher=chokidar.watch(dir,{ignoreInitial:true,depth:0,awaitWriteFinish:{stabilityThreshold:1800,pollInterval:300}});watcher.on('add',file=>{if(L.EXTENSIONS.has(path.extname(file).toLowerCase()))queueImport([file],true).catch(e=>log('error',e.message));});watcher.on('error',e=>log('error',e.message));log('info',`Автоимпорт новых файлов: ${dir}`);}emit('watching',!!watcher);return !!watcher;},
+    watch:async({enabled})=>{if(sessionTransition)throw Error('Дождитесь окончания операции с фотосессией.');if(enabled)requireSession();if(watcher){const owner=watcher;await owner.close();if(watcher===owner)watcher=null;}if(quitting)throw Error(t('operation.closed'));if(enabled){const dir=store.settings.watchFolder;if(!dir)throw Error('Сначала выберите входящую папку.');const source=path.resolve(dir).toLowerCase(),target=path.resolve(store.settings.captureFolder).toLowerCase();if(source===target||source.startsWith(target+path.sep)||target.startsWith(source+path.sep))throw Error('Входящая папка и папка съёмки должны быть раздельными и не вложенными друг в друга.');watcher=chokidar.watch(dir,{ignoreInitial:true,depth:0,awaitWriteFinish:{stabilityThreshold:1800,pollInterval:300}});watcher.on('add',file=>{if(L.EXTENSIONS.has(path.extname(file).toLowerCase()))queueImport([file],true).catch(e=>log('error',e.message));});watcher.on('error',e=>log('error',e.message));log('info',`Автоимпорт новых файлов: ${dir}`);}emit('watching',!!watcher);return !!watcher;},
     listCard:()=>cameraCommand('listCard'),importCard:({ids})=>{requireSession();cameraIdle();if(!Array.isArray(ids)||ids.length>10000)throw Error('Некорректный список.');return cameraCommand('importCard',{ids,folder:store.settings.captureFolder});},
-    intervalStart:({count,seconds})=>{cameraIdle();requireSession();if(interval)throw Error('Интервальная съёмка уже идёт.');if(!camera.connected)throw Error('Сначала подключите камеру.');count=Number(count);seconds=Number(seconds);if(!Number.isInteger(count)||count<1||count>9999||!Number.isFinite(seconds)||seconds<2||seconds>86400)throw Error('Укажите 1–9999 кадров и паузу от 2 до 86400 секунд.');interval={id:crypto.randomUUID(),count,seconds,done:0,cancelled:false};const run=interval;emit('interval',run);(async()=>{try{for(let i=0;i<count&&!run.cancelled;i++){await capture();run.done++;if(!run.cancelled)emit('interval',{...run});if(i<count-1)await new Promise(resolve=>{const end=Date.now()+seconds*1000;const t=setInterval(()=>{if(run.cancelled||Date.now()>=end){clearInterval(t);resolve();}},150);});}if(!run.cancelled)log('success',`Интервальная съёмка завершена: ${run.done} кадров.`);}catch(e){log('error',e.message);}finally{if(interval?.id===run.id){interval=null;emit('interval',null);}}})();return interval;},
+    intervalStart:({count,seconds})=>{cameraIdle();requireSession();if(interval)throw Error('Интервальная съёмка уже идёт.');if(!camera.connected)throw Error('Сначала подключите камеру.');count=Number(count);seconds=Number(seconds);if(!Number.isInteger(count)||count<1||count>9999||!Number.isFinite(seconds)||seconds<2||seconds>86400)throw Error('Укажите 1–9999 кадров и паузу от 2 до 86400 секунд.');interval={id:crypto.randomUUID(),count,seconds,done:0,requested:0,cancelled:false};const run=interval;emit('interval',run);trackApplication((async()=>{try{for(let i=0;i<count&&!run.cancelled;i++){const receipt=await capture();run.requested++;if(receipt.confirmation==='CONFIRMED')run.done++;else run.confirmation='UNVERIFIED';if(!run.cancelled)emit('interval',{...run});if(i<count-1)await new Promise(resolve=>{const end=Date.now()+seconds*1000;const timer=setInterval(()=>{if(run.cancelled||Date.now()>=end){clearInterval(timer);resolve();}},150);});}if(!run.cancelled)log(run.confirmation==='UNVERIFIED'?'info':'success',run.confirmation==='UNVERIFIED'?t('operation.capture_unverified'):`Интервальная съёмка завершена: ${run.done} кадров.`);}catch(e){log('error',e.message);}finally{if(interval?.id===run.id){interval=null;emit('interval',null);}}})());return interval;},
     intervalStop:()=>{stopInterval('Интервальная съёмка остановлена. Текущий кадр будет сохранён.');return true;},
     window:({action})=>{if(action==='minimize')win.minimize();if(action==='maximize')win.isMaximized()?win.unmaximize():win.maximize();if(action==='close')win.close();return true;}
   };
-  commandRoutes=handlers;
+  commandRoutes=Object.fromEntries(Object.entries(handlers).map(([name,handler])=>[name,args=>{if(quitting&&!['window','boot'].includes(name))throw Error(t('operation.closed'));return ['window','boot'].includes(name)?handler(args):trackApplication(Promise.resolve().then(()=>handler(args)));}]));
   const desktop={
     copyColor:({text})=>copyHexColor(text,value=>clipboard.writeText(value)),
     openShotInspector:()=>shotInspector.open(),
@@ -273,10 +312,60 @@ function installHandlers(){
       return shell.openExternal(url);
     }
   };
-  for(const [name,handler] of Object.entries({...handlers,...desktop}))ipcMain.handle('focal:'+name,async(event,args)=>{if(event.sender!==win.webContents||event.senderFrame!==win.webContents.mainFrame)throw Error('Недопустимый источник.');if(!['boot','window'].includes(name)&&(!libraryBootstrap?.isReady()||!servicesReady||quitting))throw Error('Library is not ready.');try{return await handler(args||{});}catch(e){log('error',e.message);throw e;}});
+  for(const [name,handler] of Object.entries({...commandRoutes,...desktop}))ipcMain.handle('focal:'+name,async(event,args)=>{if(event.sender!==win.webContents||event.senderFrame!==win.webContents.mainFrame)throw Error('Недопустимый источник.');if(!['boot','window'].includes(name)&&(!libraryBootstrap?.isReady()||!servicesReady||quitting))throw Error('Library is not ready.');try{return await (Object.hasOwn(desktop,name)?trackApplication(Promise.resolve().then(()=>handler(args||{}))):handler(args||{}));}catch(e){log('error',e.message);throw e;}});
   ipcMain.on('focal:frame-ack',event=>{if(event.sender===win.webContents){desktopFrameInFlight=false;flushDesktopFrame();}});
 }
 function cleanEdits(e={}){const number=(key,min,max)=>Math.min(max,Math.max(min,Number(e[key])||0));return {exposure:number('exposure',-3,3),contrast:number('contrast',-75,100),saturation:number('saturation',-100,100),warmth:number('warmth',-100,100),monochrome:!!e.monochrome,rotation:([0,90,180,270].includes(Number(e.rotation))?Number(e.rotation):0)};}
+function writeLifecycleDiagnostic(receipt){
+  const payload={version:1,at:new Date().toISOString(),outcome:'UNKNOWN_TERMINATION',receipt,issues:[...lifecycleIssues],channels:[...workerChannels].slice(-8).map(channel=>({generation:channel.generation,exited:channel.exited,exitCode:channel.exitCode??null,operations:channel.rpc.snapshot(),transfers:channel.consumer.snapshot()}))};
+  diagnosticTail=diagnosticTail.catch(()=>{}).then(async()=>{
+    const filename=path.join(app.getPath('userData'),'lifecycle-recovery.json'),temporary=filename+'.'+crypto.randomUUID()+'.tmp';
+    await fs.mkdir(path.dirname(filename),{recursive:true});await fs.writeFile(temporary,JSON.stringify(payload,null,2),{flag:'wx'});await fs.rename(temporary,filename);
+  });return diagnosticTail;
+}
+async function drainApplicationTasks(){while(applicationTasks.size)await Promise.allSettled([...applicationTasks]);}
+async function drainTransferConsumers(){
+  while(true){
+    const revision=consumerRevision;
+    await Promise.all([...workerChannels].map(channel=>channel.consumer.drain()));
+    await importQueue;
+    const reads=await Promise.allSettled([...previewTasks]);if(reads.some(result=>result.status==='rejected'))lifecycleIssue('DERIVED_TASK_FAILED');
+    if(libraryBootstrap?.isReady())await commits.runExclusive(async()=>{});
+    if(revision===consumerRevision&&!previewTasks.size)break;
+  }
+  if(importFailures||lifecycleIssues.size||[...workerChannels].some(channel=>channel.consumer.snapshot().issues.length))throw Object.assign(Error(t('operation.transfer_issue')),{code:'LIFECYCLE_ACCOUNTING_UNKNOWN'});
+  return {drained:true};
+}
+const shutdown=createShutdownCoordinator({
+  stopAdmission:()=>{quitting=true;stopInterval();if(seriesActive())series.cancelled=true;const remoteOwner=remote,watcherOwner=watcher;watcher=null;const closes=[Promise.resolve().then(()=>remoteOwner?.stop()),Promise.resolve().then(()=>watcherOwner?.close())];return Promise.allSettled(closes).then(results=>{if(results.some(result=>result.status==='rejected'))throw Object.assign(Error('Admission cleanup failed.'),{code:'ADMISSION_CLOSE_FAILED'});return true;});},
+  requestCancellation:async()=>{
+    const channel=workerState;if(!channel||channel.exited)return;
+    channel.rpc.cancelAll();
+    if(channel.rpc.snapshot().terminated){channel.process.postMessage({type:'emergencyRelease',generation:channel.generation});return;}
+    await call('burstStop',{}, {timeoutMs:1000});
+  },
+  fenceProducers:async({deadline})=>{
+    await drainApplicationTasks();const channel=workerState;
+    if(!channel||channel.exited){if(channel&&!channel.finalizing)throw Object.assign(Error('Worker exited without a fence.'),{code:'WORKER_EXIT_UNFENCED'});return {drained:true,lastPhotoSequence:0,proof:'native-not-started',nativeStarted:false};}
+    await channel.rpc.whenIdle({exclusiveOnly:false});channel.rpc.closeAdmission();
+    const fence=await call('producerFence',{}, {timeoutMs:Math.max(1,deadline-Date.now())});channel.consumer.fence(fence.lastPhotoSequence);
+    if(fence.transfers?.failed||fence.transfers?.issues?.length)lifecycleIssue('TRANSFER_PRODUCER_UNKNOWN');
+    return fence;
+  },
+  drainConsumers:async()=>{await drainApplicationTasks();return drainTransferConsumers();},
+  persist:async()=>{if(libraryBootstrap?.isReady())await persist();return true;},
+  closeWorker:async({deadline})=>{
+    const channel=workerState;if(!channel)return {closed:true,proof:'native-not-started',nativeStarted:false};if(channel.exited)throw Object.assign(Error('Worker exited before close acknowledgement.'),{code:'WORKER_EXIT_UNFENCED'});
+    channel.finalizing=true;const result=await call('finalizeShutdown',{}, {timeoutMs:Math.max(1,deadline-Date.now())});
+    await channel.exitPromise;
+    // Teardown can expose a late callback. Account it before final window exit.
+    await drainTransferConsumers();if(libraryBootstrap?.isReady())await persist();
+    if(result.lastPhotoSequence!==channel.consumer.snapshot().frontier||result.observations?.hasFailures||channel.exitCode!==0)throw Object.assign(Error('Worker close remains unverified.'),{code:'WORKER_CLOSE_UNKNOWN'});
+    return result;
+  },
+  forceWorker:async()=>{const channel=workerState;if(!channel)return {terminated:true};if(!channel.exited){lifecycleIssue('WORKER_FORCED_TERMINATION');channel.rpc.terminate();channel.process.kill();await channel.exitPromise;}return {terminated:true};},
+  recordDiagnostic:writeLifecycleDiagnostic
+});
 function freshLibrary(){return {version:2,sessionId:null,sessions:[],photos:[],settings:{captureFolder:'',watchFolder:'',sdkDir:'',autofocus:true,grid:false,autoSelect:true},presets:[
     {id:'portrait',name:'Мягкий портрет',description:'Открытая диафрагма и спокойный цвет. Режим M, объектив f/1.8.',color:'sage',values:{iso:0x48,shutter:0x75,aperture:0x14,whiteBalance:0,pictureStyle:0x82}},
     {id:'still',name:'Предметная съёмка',description:'Детали и глубина резкости. Режим M, штатив.',color:'sand',values:{iso:0x48,shutter:0x60,aperture:0x38,whiteBalance:1,pictureStyle:0x84}},
@@ -307,7 +396,7 @@ function ensureReadyServices(){
     canRead:()=>!sessionTransition&&!quitting,
     trackRead:job=>{previewTasks.add(job);job.then(()=>previewTasks.delete(job),()=>previewTasks.delete(job));return job;}
   });
-  if(!remote)remote=createRemoteServer({getState:remoteState,command:async(name,args)=>{const result=await commandRoutes[name](args);if(['connect','disconnect','live','property'].includes(name))return remoteState().camera;if(name==='capture')return {captured:true,files:result.files?.map(f=>path.basename(f))};return result;},getPhoto:async id=>{const p=store.photos.find(p=>p.id===id);return p?.thumbPath?fs.readFile(p.thumbPath):null;},log,onClients:info=>{remoteInfo=info.running?{...remoteInfo,...info}:{running:false,clients:0};emit('remote',remoteInfo);}});
+  if(!remote)remote=createRemoteServer({getState:remoteState,command:async(name,args)=>{if(quitting)throw Error(t('operation.closed'));const result=await commandRoutes[name](args);if(['connect','disconnect','live','property'].includes(name))return remoteState().camera;if(name==='capture')return {captured:result.confirmation==='CONFIRMED',accepted:true,confirmation:result.confirmation,observedTransfers:result.observedTransfers,files:result.files?.map(f=>path.basename(f))};return result;},getPhoto:async id=>{const p=store.photos.find(p=>p.id===id);return p?.thumbPath?fs.readFile(p.thumbPath):null;},log,onClients:info=>{remoteInfo=info.running?{...remoteInfo,...info}:{running:false,clients:0};emit('remote',remoteInfo);}});
   if(!worker)startWorker();
   servicesReady=true;
 }
@@ -334,7 +423,7 @@ app.whenReady().then(async()=>{
   win.webContents.on('did-finish-load',publishVisibility);
   win.once('ready-to-show',()=>win.show());
   win.on('closed',()=>shotInspector?.close());
-  win.on('close',e=>{if(quitting){e.preventDefault();return;}e.preventDefault();quitting=true;libraryBootstrap.dispose();stopInterval();if(seriesActive())series.cancelled=true;(async()=>{await remote?.stop();await watcher?.close();if(burstActive())await call('burstStop').catch(()=>{});if(seriesActive()||burstActive()||accessoryBusy||controlBusy||sessionTransition){while(seriesActive()||burstActive()||accessoryBusy||controlBusy||sessionTransition)await new Promise(r=>setTimeout(r,100));}await importQueue.catch(()=>{});if(worker)await Promise.race([call('shutdown').catch(()=>{}),new Promise(r=>setTimeout(r,2500))]);worker?.kill();if(libraryBootstrap.isReady())await persist();win.destroy();app.quit();})();});
+  win.on('close',e=>{e.preventDefault();if(quitting)return;void (async()=>{try{const result=await shutdown.close();if(result.outcome!=='CLOSED')log('error',t('operation.shutdown_unknown'));}finally{libraryBootstrap.dispose();try{if(!win.isDestroyed())win.destroy();}finally{app.quit();}}})().catch(()=>app.quit());});
   if(target.url)await win.loadURL(target.url);else await win.loadFile(target.file);
 });
 app.on('window-all-closed',()=>app.quit());

@@ -38,7 +38,7 @@ function createPhotoImporter({getStore,commits,extensions,uniquePath,buildPhoto,
         }
         stage='build';await beforeRead(target);
         const built=await buildPhoto(target);
-        const record={...built,fingerprint,sessionId:getStore().sessions.some(session=>session.id===sessionId)?sessionId:null,equipment:context.equipment,series:context.series||undefined,burst:context.burst||undefined,cameraTransfer:context.cameraTransfer||undefined};
+        const record={...built,fingerprint,sessionId:getStore().sessions.some(session=>session.id===sessionId)?sessionId:null,equipment:context.equipment,series:context.series||undefined,burst:context.burst||undefined,cameraTransfer:context.cameraTransfer||undefined,...(context.transfer?{transfer:context.transfer}:{})};
         stage='persist';const committed=await commits.registerPhoto(record,{cameraTransfer:!!context.cameraTransfer});
         if(hint)retained.delete(hint);
         if(!committed.added){result.skipped++;continue;}

@@ -20,7 +20,7 @@ function prepareSeries(ids,presets,camera){
   return {steps,original,setup};
 }
 async function runSeries(plan,io,job){
-  const restoreErrors=[];let failure;
+  const restoreErrors=[];let failure,unconfirmed=false;
   try{
     for(const [key,value] of Object.entries(plan.setup||{}))await io.property({key,value});
     for(let index=0;index<plan.steps.length;index++){
@@ -28,14 +28,16 @@ async function runSeries(plan,io,job){
       const step=plan.steps[index];job.index=index;job.current=step.name;job.phase='applying';io.progress({...job});
       for(const [key,value] of Object.entries(step.values)){if(job.cancelled)break;await io.property({key,value});}
       if(job.cancelled)break;
-      job.phase='capturing';io.progress({...job});await io.capture({seriesId:job.id,presetId:step.presetId,presetName:step.name,index,total:plan.steps.length,startedAt:job.startedAt});
-      job.done++;io.progress({...job});await io.waitImports?.();
+      job.phase='capturing';io.progress({...job});const receipt=await io.capture({seriesId:job.id,presetId:step.presetId,presetName:step.name,index,total:plan.steps.length,startedAt:job.startedAt});
+      job.requested=(job.requested||0)+1;
+      if(receipt?.confirmation==='CONFIRMED')job.done++;else{unconfirmed=true;job.confirmation='UNVERIFIED';job.observedTransfers=(job.observedTransfers||0)+(receipt?.observedTransfers||0);}
+      io.progress({...job});await io.waitImports?.();
     }
   }catch(error){failure=error;}
   finally{
     job.phase='restoring';io.progress({...job});
     for(const [key,value] of Object.entries(plan.original))try{await io.property({key,value});}catch(error){restoreErrors.push(`${LABELS[key]||key}: ${error.message}`);}
-    job.phase='done';job.restoreErrors=restoreErrors;job.status=failure||restoreErrors.length?'failed':job.cancelled?'cancelled':'completed';
+    job.phase='done';job.restoreErrors=restoreErrors;job.status=failure||restoreErrors.length?'failed':job.cancelled?'cancelled':unconfirmed?'unconfirmed':'completed';
     job.error=failure?.message||(restoreErrors.length?'Не все исходные настройки удалось восстановить.':null);io.progress({...job});
   }
   return job;

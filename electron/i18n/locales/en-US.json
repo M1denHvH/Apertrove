@@ -382,7 +382,7 @@
   "desktop.take_a_set_number_of_photos_with_a": "Take a set number of photos with a pause between each one.",
   "desktop.number_of_shots": "Number of shots",
   "desktop.pause_after_each_shot_sec": "Pause after each shot, sec",
-  "desktop.the_pause_starts_after_saving_each_photo_stopping": "The pause starts after saving each photo. Stopping finishes the current shot.",
+  "desktop.the_pause_starts_after_saving_each_photo_stopping": "The pause starts after the current request finishes. Stop prevents further requests; camera work already in progress may continue.",
   "desktop.shooting": "Shooting",
   "desktop.stop_series": "Stop series",
   "desktop.start_shooting": "Start shooting",
@@ -1603,5 +1603,14 @@
   "export.incomplete": "The export did not complete. A possibly incomplete file was retained at {{path}}. Inspect it before use and choose a new filename to retry.",
   "import.retained": "{{name}}: {{message}} A file was retained at {{path}}. Inspect it and select it explicitly to retry registration.",
   "boot.recovery_required": "The main library is missing, but previous library data was found. Close Apertrove and inspect the backup before restoring it. An empty library has not been created.",
-  "recovery.backup_warning": "The library was opened, but its previous-generation backup could not be updated. Existing backup data was retained. Exports remain available; inspect the backup before changing the library."
+  "recovery.backup_warning": "The library was opened, but its previous-generation backup could not be updated. Existing backup data was retained. Exports remain available; inspect the backup before changing the library.",
+  "operation.timeout_draining": "The request timed out. The camera may still be working; wait before sending another command.",
+  "operation.busy": "A camera operation is still in progress. Wait for it to finish.",
+  "operation.stale": "The camera session changed. Check the connection before retrying.",
+  "operation.unknown": "The camera operation ended without confirmation. Check saved files and restart Apertrove.",
+  "operation.closed": "Apertrove is closing. New camera commands are no longer accepted.",
+  "operation.transfer_issue": "A file transfer or library registration could not be confirmed. Check Library and the activity log. Retained files were not removed.",
+  "operation.capture_unverified": "Capture results are unconfirmed. Check Library, including photos without a session.",
+  "operation.shutdown_unknown": "Shutdown could not be confirmed. Check the activity log and saved files before the next session.",
+  "operation.requests_progress": "Requests: {{requested}} / {{total}} · confirmed captures: {{confirmed}}"
 }
