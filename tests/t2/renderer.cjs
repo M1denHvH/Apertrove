@@ -19,7 +19,7 @@ const dns=require('node:dns');
 const REPO=path.resolve(__dirname,'../..');
 const EDGE='C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe';
 const FIXTURES=path.join(REPO,'qa','integration','fixtures');
-const ALLOWED_COMMANDS=Object.freeze(['boot','window','settings','onboardingSave','cameraEndDiagnostics','sdkEnvironment','listCameras','equipment','importFiles','renderPreview','photoMetadata','exportMetadata','exportPhoto','exportPresets','importPresets','openShotInspector','copyColor']);
+const ALLOWED_COMMANDS=Object.freeze(['boot','window','settings','onboardingSave','cameraEndDiagnostics','sdkEnvironment','listCameras','equipment','importFiles','renderPreview','photoMetadata','exportMetadata','exportPhoto','exportPresets','importPresets','openShotInspector','copyColor','flashSupport','burstStart','burstStop']);
 const clone=value=>JSON.parse(JSON.stringify(value));
 const within=(root,file)=>{const relative=path.relative(root,file);return relative===''||(!path.isAbsolute(relative)&&relative!=='..'&&!relative.startsWith('..'+path.sep));};
 const sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms));
@@ -75,7 +75,7 @@ function installHostSentinels(){
 
 function installBridge({origin,token}){
   const listeners=new Set();
-  const commands=['boot','window','settings','onboardingSave','cameraEndDiagnostics','sdkEnvironment','listCameras','equipment','importFiles','renderPreview','photoMetadata','exportMetadata','exportPhoto','exportPresets','importPresets','openShotInspector','copyColor'];
+  const commands=['boot','window','settings','onboardingSave','cameraEndDiagnostics','sdkEnvironment','listCameras','equipment','importFiles','renderPreview','photoMetadata','exportMetadata','exportPhoto','exportPresets','importPresets','openShotInspector','copyColor','flashSupport','burstStart','burstStop'];
   const rpc=async(method,args={})=>{
     if(!commands.includes(method))throw Error('Unknown fixture command');
     const response=await fetch(origin+'/__fixture/rpc',{method:'POST',headers:{'Content-Type':'application/json','X-Fixture-Token':token},body:JSON.stringify({fixture:new URL(location.href).searchParams.get('fixture'),method,args})});
@@ -88,6 +88,8 @@ function installBridge({origin,token}){
   const focal={initialLocale:'en-US',initialAppearance:appearance,on:callback=>{listeners.add(callback);return()=>listeners.delete(callback);},onFrame:()=>()=>{},onFocus:()=>()=>{},onWindowVisible:()=>()=>{}};
   for(const command of commands)focal[command]=args=>rpc(command,args);
   Object.defineProperty(window,'focal',{value:Object.freeze(focal),writable:false,configurable:false});
+  // Test fixture events only. This bridge is never part of the built application.
+  Object.defineProperty(window,'__apertroveSyntheticEvent',{value:event=>{for(const listener of listeners)listener(event);},writable:false,configurable:false});
 }
 
 async function main(){
@@ -188,6 +190,9 @@ async function main(){
     if(method==='cameraEndDiagnostics')return {result:null};
     if(method==='sdkEnvironment'){settings.onboarding.environment={status:'missing',architecture:'x64',checks:[],fixture:true};await storage.writeLibraryStore(fixture.filename,fixture.store);return {result:clone(settings.onboarding.environment),...changed()};}
     if(method==='listCameras')return {result:[]};
+    if(method==='flashSupport')return {result:{available:false,canAttempt:false,error:'Synthetic provider has no flash.'}};
+    if(method==='burstStart'){assert.equal(args.seconds,5);return {result:{status:'holding'},events:[{type:'burst',data:{id:'synthetic-burst',status:'holding',shots:0}},{type:'operationState',data:{busy:true}}]};}
+    if(method==='burstStop')return {result:{status:'unconfirmed'},events:[{type:'burst',data:{id:'synthetic-burst',status:'unconfirmed',shots:0,observedTransfers:1}},{type:'operationState',data:{busy:false}}]};
     if(method==='equipment')return {result:Object.fromEntries(['camera','lens'].map(kind=>[kind,{kind,name:'',source:null,manufacturer:'',connected:false,facts:[],stats:[]}]))}; // No source/name: never asks for manufacturer/product media.
     if(method==='renderPreview'){assert.equal(args.id,'synthetic-photo');return {result:png};} // Fixture pixels only; no Sharp/codec execution.
     if(method==='photoMetadata'){assert.equal(args.id,'synthetic-photo');return {result:{file:{name:'synthetic.png',width:1,height:1,bytes:68},metadata:{EXIF:{Artist:'Synthetic fixture'}},errors:[]}};}
@@ -295,6 +300,29 @@ async function main(){
     }
   }
   checks.push('actual React navigation: Sessions/Capture/Library/Presets/Equipment/Tools/Web Remote/Settings; equipment RPC called and two disconnected cards rendered without equipment-error');
+  await nav.getByRole('button',{name:label('desktop.capture'),exact:true}).click();
+  const cameraEvent={connected:true,model:'Synthetic provider',properties:{driveMode:{value:0,choices:[]}},capabilities:{capture:true,liveView:false,focus:false},live:false};
+  await page.evaluate(camera=>window.__apertroveSyntheticEvent({type:'camera',data:camera}),cameraEvent);
+  const shutter=page.locator('.capture-button-group button.shutter');await shutter.waitFor();
+  await page.waitForFunction(()=>!document.querySelector('.capture-button-group button.shutter')?.disabled);
+  await page.evaluate(()=>window.__apertroveSyntheticEvent({type:'operationState',data:{busy:true,ledger:{operations:[{state:'DRAINING'}]}}}));
+  await page.waitForFunction(()=>document.querySelector('.capture-button-group button.shutter')?.disabled===true);
+  await page.screenshot({path:path.join(runRoot,'operation-draining.png'),animations:'disabled'});
+  await page.evaluate(()=>window.__apertroveSyntheticEvent({type:'operationState',data:{busy:true,ledger:{admissionOpen:false,history:[{state:'UNKNOWN_TERMINATION'},{state:'COMPLETED',method:'status'}]}}}));
+  await page.getByText(label('operation.unknown'),{exact:true}).first().waitFor();
+  assert.equal(await shutter.isEnabled(),false,'A safety response must not clear UNKNOWN admission');
+  await page.evaluate(()=>window.__apertroveSyntheticEvent({type:'operationState',data:{busy:false}}));
+  await page.waitForFunction(()=>!document.querySelector('.capture-button-group button.shutter')?.disabled);
+  await page.evaluate(camera=>window.__apertroveSyntheticEvent({type:'camera',data:{...camera,properties:{driveMode:{value:1,choices:[]}}}}),cameraEvent);
+  const burstButton=page.locator('.native-burst-control button');await burstButton.waitFor();
+  const bounds=await burstButton.boundingBox();assert.ok(bounds);await page.mouse.move(bounds.x+bounds.width/2,bounds.y+bounds.height/2);await page.mouse.down();
+  await waitForCount(valid,'burstStart',1);await page.waitForFunction(()=>document.querySelector('.native-burst-control button')?.textContent.includes('Release'));
+  assert.equal(await burstButton.isEnabled(),true,'An owned held shutter must remain releasable');await page.mouse.up();await waitForCount(valid,'burstStop',1);
+  await page.locator('.native-burst-control small').filter({hasText:label('operation.capture_unverified')}).waitFor();
+  assert.equal(await page.locator('.native-burst-control small').innerText(),label('operation.capture_unverified'));
+  await page.screenshot({path:path.join(runRoot,'operation-unconfirmed.png'),animations:'disabled'});
+  await page.evaluate(()=>{window.__apertroveSyntheticEvent({type:'burst',data:null});window.__apertroveSyntheticEvent({type:'camera',data:{connected:false,properties:{},capabilities:{capture:false,liveView:false,focus:false}}});});
+  checks.push('actual React operationState draining blocks new shutter; proven handler receipt releases busy; held burst remains releasable through pointer-up and UNVERIFIED transfer shows no false saved-count success (fixture transport)');
   await nav.getByRole('button',{name:label('desktop.settings'),exact:true}).click();
   await page.getByRole('button',{name:label('appearance.theme').replace('{{v0}}',label('appearance.dark')),exact:true}).click();
   await page.waitForFunction(()=>document.documentElement.dataset.theme==='dark');

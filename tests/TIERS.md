@@ -94,3 +94,17 @@ S2A добавляет пять opt-in entrypoints; ни один не доба�
 T1 и filesystem запускаются с `node --no-addons --max-old-space-size=192`; codec — с `node --max-old-space-size=192` **без** `--no-addons`, только после отдельного source/native-asset hash review. Codec отключает global libvips/plugins, очищает preload/native environment, допускает единственный exact addon и ограничивает child-process/network/module attempts. Встроенный `zlib` нужен actual exifr; optional native modules не разрешены. Positive JPEG evidence: actual production `renderEditedBuffer`, SOF dimensions, native decode, changed pixels и actual held-handle write. Metadata/preset JSON независимо разбираются. Guard не является OS sandbox; Windows DLL loader не инструментирован независимо.
 
 S1/S1.5 регрессии выполняются заново на S2A HEAD. `tests/t2/guard.cjs` дополнен только recovery dependency, `crypto.createHash` и confined `open('wx')`/handle write/close. Renderer дополнен metadata reject/retry/cancel и missing-primary/backup/degraded-boot cases: actual built React + guarded storage, focal/dialog/service transport остаётся fixture. Это не actual Electron IPC или OS Save dialog test. Source packaging preflight выполняется без создания архива. Electron/Canon/EDSDK/Koffi/WIA/PTP, реальные фотографии/profiles, T3 и packaged execution по-прежнему не разрешены.
+
+## Именованные S2C контуры
+
+Общий допуск: empty `NODE_OPTIONS`/`NODE_PATH`, полный `APERTROVE_SOURCE_COMMIT`, explicit flags, отдельный прочитанный entrypoint и полный execution graph. Новые файлы не входят в default `npm test` / wildcard discovery.
+
+| Entry | Допуск / предел |
+|---|---|
+| `tests/s2c/lifecycle.cjs --tier T1 --scope synthetic` | `node --no-addons --max-old-space-size=192`; closed 9-module pure VM; fake transport/clock/SDK/reference ledger, transfer/registration ports in memory, shutdown/error/series traces; 15 s total, 1 s/case, max70 cases |
+| `tests/s2c/worker-capture.cjs --tier T1 --scope synthetic` | Тот же Node prefix; только выделенные capture/fail/settle/stop функции actual worker source + pure latch/observations в VM; fake JS SDK, 10 s total; весь worker, Koffi и callback ABI не выполняются |
+| `tests/s2c/transport.cjs --tier T2 --scope synthetic` | `node --no-addons --max-old-space-size=192`; actual Node IPC с exact `fake-worker.cjs`, максимум1 concurrent/3 sequential children, каждый `--no-addons --max-old-space-size=128`; 30 s suite, 2 s wait, 128 messages/child. Actual S2A registration/recovery через confined `qa/s2c/fixtures` FS: 500 operations, 1 MiB/file, 4 MiB reads и writes, 4 handles |
+
+Fake child не standalone entry; только exact caller args/environment/fixture, без SDK loader/fallback, Electron, native addons или network. В T2 проверяются controlled crash/hang/force, late file, registration acknowledgement, actual rename failure/retry, physical original SHA и owned process/handle cleanup. Эти доказательства не являются actual Electron utilityProcess/IPC или vendor native lifecycle certification.
+
+S2C renderer fixture дополнен событиями operation ownership и synthetic burst pointer down/up: busy после timeout/drain, отпускание удерживаемого затвора остаётся доступным, unconfirmed receipt не показывает saved-count success. Физический camera provider по-прежнему отсутствует. Последовательность финальных регрессий, команды/exits/counts и source hashes находятся в `docs/SPRINT_S2C.md` и ignored `qa/s2c/`. Real Electron smoke остаётся отдельной авторизацией executable/setup и fail-closed fake provider; T3/H не разрешены.
