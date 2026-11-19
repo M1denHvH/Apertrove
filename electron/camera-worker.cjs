@@ -53,7 +53,7 @@ function releaseSdk() {
   sdk=null;
   if(library)try{observed('library.unload','library-unload',()=>library.unload(),'void');}catch{teardownUncertain=true;return false;}
   library=null;
-  if(dllDirectory)try{observed('SetDllDirectoryW','cleanup',()=>dllDirectory(null),'void');}catch{}
+  if(dllDirectory)try{observed('SetDllDirectoryW','cleanup',()=>dllDirectory(null),'boolean');}catch{}
   state.sdkPath=null;
   return true;
 }

@@ -68,7 +68,7 @@ Regression pass на final candidate HEAD включает S1 bootstrap, securit
 
 | Именованная проверка | Исполненный результат / ожидаемый exact final count |
 |---|---:|
-| S2C lifecycle T1 | 45 / 45, exit0 |
+| S2C lifecycle T1 | 46 / 46, exit0 |
 | Actual extracted worker capture T1 | 8 / 8, exit0 |
 | S2C Node IPC + actual S2A registration T2 | 7 / 7, exit0; child exits0 / controlled23 / forcedSIGTERM; остаток0 |
 | S2A protected export policy T1 | 40 / 40, exit0 |
@@ -91,9 +91,9 @@ Regression pass на final candidate HEAD включает S1 bootstrap, securit
 
 Фактические агенты: `s2c_rpc` — RPC helper/FSM; `s2c_transfer_vendor` — immutable route/vendor research/readiness и узкий UI; `s2c_shutdown` — coordinator/observations; `s2c_qa` — focused T1/T2; `s2c_reviewer` — независимое source/assertion/evidence review. Root владеет integration main/worker, transfer producer/consumer, extracted worker capture tests, renderer fixtures, execution и commits. Общие production файлы не редактировались параллельно разными владельцами.
 
-Исправлены review findings: stale ordinary admission; post-fence smaller sequence; premature release async fake download; cross-epoch route reset; ignored-envelope epoch poisoning; unbounded generation retention; post-await watcher/Remote producer creation; early exited-worker false close; manual burst native throw followed by quiet false success. Итоговый clearance ограничен прочитанным source и исполненным synthetic scope.
+Исправлены review findings: stale ordinary admission; post-fence smaller sequence; premature release async fake download; cross-epoch route reset; ignored-envelope epoch poisoning; unbounded generation retention; post-await watcher/Remote producer creation; early exited-worker false close; manual burst native throw followed by quiet false success. Дополнительная root-проверка отделила BOOL cleanup от void: raw false у `SetDllDirectoryW` теперь UNKNOWN failure, raw true — SOURCE_TRUE; нормальный call order не менялся. Итоговый clearance ограничен прочитанным source и исполненным synthetic scope.
 
-Первый крупный QA file write завис и был прерван; readback подтвердил отсутствие partial file, после чего агент перешёл на bounded writes. Это не runtime failure и не PASS. Первый lifecycle admission отказал до тестов: missing pure транзитивная зависимость `camera-values → image-quality`; root прочитал её, добавил exact9th module и сохранил `lifecycle-attempt1-console.txt`. Следующий запуск45/45. Host/child bare-package deny regex исправлен source review до первого T2 запуска. Precommit reports/console сохраняются отдельно от final evidence; они честно имеют baseline HEAD + actual dirty-source hashes.
+Первый крупный QA file write завис и был прерван; readback подтвердил отсутствие partial file, после чего агент перешёл на bounded writes. Это не runtime failure и не PASS. Первый lifecycle admission отказал до тестов: missing pure транзитивная зависимость `camera-values → image-quality`; root прочитал её, добавил exact9th module и сохранил `lifecycle-attempt1-console.txt`. Следующий запуск45/45. Host/child bare-package deny regex исправлен source review до первого T2 запуска. Precommit reports/console сохраняются отдельно от final evidence; они честно имеют baseline HEAD + actual dirty-source hashes. Полный16-command PASS прежнего candidate `c1a0e07` сохранён в `qa/s2c/candidate-c1a0e07/`; после BOOL correction выполнен отдельный final pass, без переиспользования старого PASS.
 
 ## Vendor unknowns, operational risks и следующий шаг
 
