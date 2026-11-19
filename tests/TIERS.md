@@ -108,3 +108,17 @@ S1/S1.5 регрессии выполняются заново на S2A HEAD. `t
 Fake child не standalone entry; только exact caller args/environment/fixture, без SDK loader/fallback, Electron, native addons или network. В T2 проверяются controlled crash/hang/force, late file, registration acknowledgement, actual rename failure/retry, physical original SHA и owned process/handle cleanup. Эти доказательства не являются actual Electron utilityProcess/IPC или vendor native lifecycle certification.
 
 S2C renderer fixture дополнен событиями operation ownership и synthetic burst pointer down/up: busy после timeout/drain, отпускание удерживаемого затвора остаётся доступным, unconfirmed receipt не показывает saved-count success. Физический camera provider по-прежнему отсутствует. Последовательность финальных регрессий, команды/exits/counts и source hashes находятся в `docs/SPRINT_S2C.md` и ignored `qa/s2c/`. Real Electron smoke остаётся отдельной авторизацией executable/setup и fail-closed fake provider; T3/H не разрешены.
+
+## Именованный IC01 real Electron контур
+
+Задание Integration Candidate 01 отдельно разрешает exact official **Electron 45.3.2 win32-x64** только после проверки archive/executable/supporting-file SHA и fail-closed provider admission. Исторические ограничения выше описывают прежние спринты; новый допуск не распространяется на legacy harness, T3 или hardware.
+
+```text
+node --no-addons --max-old-space-size=256 tests/ic01/smoke.cjs --tier T2 --scope synthetic --allow-electron-ic01
+```
+
+Обязательны пустые `NODE_OPTIONS`/`NODE_PATH`, полный `APERTROVE_SOURCE_COMMIT`, candidate cwd, reviewed build и exact runtime в ignored `qa/integration-candidate/runtime/`. Runner использует actual main/preload/React, Electron `utilityProcess`, actual Sharp на generated fixtures и fixed dialog outcomes. `entry.cjs` до загрузки main устанавливает одноразовый unpackaged composition port с точным `fake-camera.cjs`; normal Canon worker, Koffi/SDK, WIA/PowerShell, shell actions и fallback запрещены. Main/Inspector/host guards, negative fail-before-load probes, synthetic profile paths и записи SHA входят в evidence. Test drivers недоступны renderer/LAN и packaged app; default npm scripts не изменены.
+
+Пределы: 240 s suite, 25 s/group, максимум14 последовательных applications/1 concurrent, 75 s/application, максимум8 utilities/application с heap128. Фактическая матрица — 20 групп/12 applications. Inspector запускает настоящий codec worker через confined wrapper и проверяет повторное открытие, IPC и token policy. Foreign sandboxed subframe probe доказывает отказ чужому WebContents с subframe; не заявляется отдельная проверка только mainFrame-ветви на том же production WebContents. Разрешены лишь localhost debugger connections; браузерный egress закрыт. Счётчики guards и profile redirection не являются OS sandbox или независимой инструментализацией Windows DLL loader.
+
+Exact commands/exits/HEAD/source hashes, protected originals, shutdown outcomes и process cleanup сохраняются в `qa/integration-candidate/`; исходные admission receipts — снимки **до запуска**, runtime evidence — отдельный smoke report. `docs/INTEGRATION_CANDIDATE_01.md` описывает результат и scope. Старые именованные регрессии выполняются на том же финальном HEAD, включая дополненный security T1 (30 проверок deferred/rejected clipboard acknowledgement). Main SEC-004 CSP остаётся OPEN; package/ASAR/installer/clean Windows, vendor ACK/ref/ABI, реальные RAW/model timing и hardware certification не входят в IC01.
