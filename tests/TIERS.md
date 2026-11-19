@@ -78,3 +78,19 @@ H3: **любой shutter/capture**, burst/timer и faults during capture.
 У всех обязательны `node --no-addons`, пустые NODE_OPTIONS/NODE_PATH. Remote/renderer требуют APERTROVE_SOURCE_COMMIT=полный проверенный HEAD. Конкретные команды, память/время, physical hashes, previous failures, limitations и compatibility matrix: `docs/SPRINT_S1_5_S2B.md` и ignored qa/integration reports.
 
 Это не разрешает запуск default `npm test`, прежних app/hardware scripts, Electron download/setup или T3/H. Library import/export/Inspector checks в browser fixture означают UI dispatch с cancelled/mock result; native file/codec success не заявляется. Actual Electron gate и main CSP acceptance остаются BLOCKED.
+
+## Именованные S2A контуры
+
+S2A добавляет пять opt-in entrypoints; ни один не добавлен в wildcard discovery или default npm test. Общие условия: пустые `NODE_OPTIONS`/`NODE_PATH`, полный проверенный `APERTROVE_SOURCE_COMMIT`, generated synthetic fixtures. Полные commands/exits и source hashes находятся в ignored `qa/s2a/execution-ledger.json` и `qa/s2a/final-verification.json`; контракты — `docs/SPRINT_S2A.md`.
+
+| Entry / аргументы | Допуск и фактическая граница |
+|---|---|
+| `tests/s2a/export-policy.cjs --tier T1 --scope synthetic` | T1 actual export helper в closed VM, model FS/aliases/faults; 20 s total, 2 s/case; не codec/OS evidence |
+| `tests/s2a/registration.cjs --tier T1 --scope synthetic` | T1 actual committer/schema, memory writer; 15 s total, 1 s/case; staged/ack/queue/dedup assertions |
+| `tests/s2a/recovery.cjs --tier T1 --scope synthetic` | T1 actual recovery/schema/text helpers, memory FS; 15 s total, 1 s/case; controlled interruption/close/backup faults |
+| `tests/s2a/filesystem.cjs --tier T2 --scope synthetic` | T2 actual export routes/owned handles/import copy/registration/recovery через `fs-guard.cjs`; fixtures только `qa/s2a/fixtures`; 30 s total, 3 s/case, 180 files, 3000 operations, 1 MiB/file, 16 MiB aggregate read/write, 8 handles |
+| `tests/s2a/codec.cjs --tier T2 --scope synthetic --allow-native-sharp` | T2 exact reviewed Sharp 0.35.5 addon + bundled DLL assets, exifr JS closure, generated 32×24 RGB/JPEG buffers; 30 s total including preflight, ≤4096 pixels, ≤1 MiB/buffer, 512 MiB sampled RSS cap |
+
+T1 и filesystem запускаются с `node --no-addons --max-old-space-size=192`; codec — с `node --max-old-space-size=192` **без** `--no-addons`, только после отдельного source/native-asset hash review. Codec отключает global libvips/plugins, очищает preload/native environment, допускает единственный exact addon и ограничивает child-process/network/module attempts. Встроенный `zlib` нужен actual exifr; optional native modules не разрешены. Positive JPEG evidence: actual production `renderEditedBuffer`, SOF dimensions, native decode, changed pixels и actual held-handle write. Metadata/preset JSON независимо разбираются. Guard не является OS sandbox; Windows DLL loader не инструментирован независимо.
+
+S1/S1.5 регрессии выполняются заново на S2A HEAD. `tests/t2/guard.cjs` дополнен только recovery dependency, `crypto.createHash` и confined `open('wx')`/handle write/close. Renderer дополнен metadata reject/retry/cancel и missing-primary/backup/degraded-boot cases: actual built React + guarded storage, focal/dialog/service transport остаётся fixture. Это не actual Electron IPC или OS Save dialog test. Source packaging preflight выполняется без создания архива. Electron/Canon/EDSDK/Koffi/WIA/PTP, реальные фотографии/profiles, T3 и packaged execution по-прежнему не разрешены.
