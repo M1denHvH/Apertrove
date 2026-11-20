@@ -2,7 +2,7 @@
 
 S1 baseline: d7c9e02f09c89d70afdce72cd38ec99fadb05489. Все существующие test scripts классифицированы чтением исходников, а не запуском.
 
-## Единственная S1 T1 allowlist
+## Изолированный S1 T1 runner
 
 tests/t1/policy.cjs задаёт ровно четыре entrypoint:
 - tests/t1/library-schema.test.cjs
@@ -10,7 +10,7 @@ tests/t1/policy.cjs задаёт ровно четыре entrypoint:
 - tests/t1/boot-state.test.cjs
 - tests/t1/isolation.test.cjs
 
-Runner: tests/t1-runner.cjs. Он требует --tier T1 --scope synthetic и конкретные имена файлов. Нет wildcard discovery; неизвестные entrypoints, scope, tier, duplicates/traversal отклоняются до загрузки. Default npm test не изменён и **не является S1-safe command**.
+Runner: tests/t1-runner.cjs. Он требует --tier T1 --scope synthetic и конкретные имена файлов. Нет wildcard discovery; неизвестные entrypoints, scope, tier, duplicates/traversal отклоняются до загрузки. `npm run test:t1` запускает эту изолированную четвёрку в CI. Этот VM runner остаётся единственным entrypoint для его закрытой test-source sandbox; нижеприведённый обычный `node:test` список — отдельный проверенный CI-контур и не использует runner.
 
 Команда после очистки NODE_OPTIONS/NODE_PATH в текущем shell:
 
@@ -32,11 +32,15 @@ Production filesystem adapter и Electron main вообще не импорти�
 
 ## Классификация baseline56 файлов
 
-Ни одна строка ниже **не добавляет legacy script в allowlist**.
+### Проверенный прямой `node:test` CI список
+
+После статического чтения импортов и тестовых callback paths для CI Recovery 01 допущены ровно 13 legacy suite из первой строки таблицы. Они запускаются только explicit file list из `package.json` (`npm test`) на Windows Node 24 с `node --no-addons`. Проверенные вызовы используют чистые helper-функции, встроенные crypto/Intl/Buffer либо внедрённые mock camera callbacks; ни один callback или его тестируемый import path не открывает файловую систему, сеть, child process, Electron, Canon SDK, Koffi или WIA. `equipment.cjs` содержит сетевую `loadProduct`, но suite вызывает только identify/parse/safeUrl/cards. `lighting-colors` загружается динамическим import, поддерживаемым Node 24. `--no-addons` — дополнительный предохранитель, не sandbox.
+
+Пересматривайте весь import closure и callbacks перед изменением этого списка или добавлением/переносом тестов. Остальные wildcard-discovered legacy suites сюда не входят: их native, codec, filesystem, child-process или listener paths остаются в отдельных проверенных T2 gates ниже. Wildcard discovery запрещён в CI.
 
 | Группа | Файлы | Уровень / ограничения |
 |---|---|---|
-| 13 pure candidates | camera-control.test.cjs; camera-destinations.test.cjs; camera-discovery.test.cjs; capture-timing.test.cjs; equipment.test.cjs; focus-info.test.cjs; i18n.test.cjs; lighting-colors.test.cjs; native-focus.test.cjs; preset-series.test.cjs; remote-appearance.test.cjs; shutter-latch.test.cjs; workspace.test.cjs | Возможный T1 после отдельного entrypoint/closure review. Lighting-colors имеет ESM import, equipment содержит network-capable function; не допущены текущим runner |
+| 13 pure candidates | camera-control.test.cjs; camera-destinations.test.cjs; camera-discovery.test.cjs; capture-timing.test.cjs; equipment.test.cjs; focus-info.test.cjs; i18n.test.cjs; lighting-colors.test.cjs; native-focus.test.cjs; preset-series.test.cjs; remote-appearance.test.cjs; shutter-latch.test.cjs; workspace.test.cjs | Допущены в explicit `npm test` после отдельного closure/callback review; не исполняются закрытым VM runner |
 | 10 mixed/native/I/O | camera-capabilities.test.cjs; flash-bridge.test.cjs; image-quality.test.cjs; library.test.cjs; metadata.test.cjs; native-buffer.test.cjs; photo-delete.test.cjs; remote-server.test.cjs; session-delete.test.cjs; sessions.test.cjs | Не автоматически T1: filesystem, child_process, codecs, native memory или listeners. sessions после S1 больше не тянет Sharp, но старый entrypoint всё равно не включён |
 | 20 application/UI | appearance.cjs; designs.cjs; focus-flash-ui.cjs; i18n-ui.cjs; iris-appearance-ui.cjs; live-resize-ui.cjs; onboarding-ui.cjs; photo-delete-ui.cjs; refinement-ui.cjs; remote-appearance-ui.cjs; remote-controls-ui.cjs; remote-layout-audit.cjs; session-delete-ui.cjs; smoke.cjs; studio-inspector-ui.cjs; studio-ui.cjs; ui-layout-audit.cjs; ui-state-audit.cjs; unified-appearance-ui.cjs; workspace-ui.cjs | T2 app minimum; actual native isolation не доказана. Для некоторых worker substitution есть, но не для всех. Нельзя запускать без отдельного разрешения |
 | 8 hardware-enabled | af-probe.cjs; af-ui.cjs; benchmark-live.cjs; debug-live.cjs; focus-flash-hardware.cjs; hardware.cjs; integration.cjs; probe-camera.cjs | Максимальный наблюдаемый путь H2: property/focus/EVF/WIA/destination. Connect не автоматически read-only |
