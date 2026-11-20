@@ -1,5 +1,11 @@
 # Test tiers и разрешённый S1 scope
 
+## N1 source-only и будущий N2
+
+`tests/native-n1/check.cjs` запускается отдельно через `node --no-addons --max-old-space-size=192 --test tests/native-n1/check.cjs`: generated PE parser fixtures в ignored `qa/native-n1/fixtures`, addon-free child только для dry-run/admission refusal и VM-extracted production BOOL binding. Это не реальная native ABI проверка. `prepare.cjs` читает явно выбранные PE/reference bytes и создаёт UNQUALIFIED manifest; `run.cjs --dry-run` не импортирует addon и не создаёт native child. Точные команды и пять unresolved review gates — `docs/N2_EXECUTION_PLAN.md`.
+
+`worker.cjs` не самостоятельный тест и не входит в CI/npm scripts. Реальная `run.cjs --execute` требует нового явного N2 допуска, matching lifecycle/dependency/addon/effects evidence, полного manifest и физического отключения камер. N1 этот запуск не разрешает; H1/H2/H3 отдельно. Нельзя обходить vendor blocker переключением manifest booleans.
+
 S1 baseline: d7c9e02f09c89d70afdce72cd38ec99fadb05489. Все существующие test scripts классифицированы чтением исходников, а не запуском.
 
 ## Изолированный S1 T1 runner

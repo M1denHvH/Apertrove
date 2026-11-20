@@ -71,7 +71,10 @@ function load(custom) {
 function loadCandidate(file) {
   nativeStarted=true;
   const kernel=koffi.load('kernel32.dll');
-  dllDirectory??=kernel.func('bool __stdcall SetDllDirectoryW(str16 path)');
+  if(!dllDirectory){
+    const setDirectory=kernel.func('int32 __stdcall SetDllDirectoryW(str16 path)');
+    dllDirectory=directory=>setDirectory(directory)!==0;
+  }
   if(!dllDirectory(path.dirname(file)))throw Error('Windows не приняла каталог зависимостей SDK.');
   if(!com){
     const ole=koffi.load('ole32.dll');
