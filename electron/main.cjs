@@ -35,6 +35,7 @@ const {previousPath}=require('./library-recovery.cjs');
 const {createOperationClient}=require('./operation-lifecycle.cjs');
 const {createTransferConsumer}=require('./transfer-consumer.cjs');
 const {createShutdownCoordinator}=require('./shutdown-coordinator.cjs');
+const {createWorkerRetirement}=require('./runtime-replacement.cjs');
 const metadataCache=new Map();
 const previewTasks=new Set();
 app.setName('Apertrove');
@@ -52,14 +53,14 @@ let libraryBootstrap,servicesReady=false;
 let remote,remoteInfo={running:false,clients:0},commandRoutes,knownCameras=[],remoteStateTimer,desktopFrameInFlight=false,pendingDesktopFrame=null;
 let importQueue=Promise.resolve(),workerState=null;const assets=new Map(),applicationTasks=new Set(),workerChannels=new Set();
 let consumerRevision=0,importFailures=0;
-const lifecycleIssues=new Set();let diagnosticTail=Promise.resolve();
+const lifecycleIssues=new Set();let diagnosticTail=Promise.resolve(),runtimeQuarantined=false;
 function lifecycleIssue(code){if(lifecycleIssues.size<32)lifecycleIssues.add(code);}
 let burst=null,series=null,sessionTransition=false,captureMetadata=null,focusPreview=null,accessoryBusy=false,controlBusy=false;
 const burstActive=()=>burst&&['holding','transferring'].includes(burst.status);
 const seriesActive=()=>series&&['running','stopping','restoring'].includes(series.status);
 function requireSession(){if(!store.sessions.some(s=>s.id===store.sessionId))throw Error('Создайте или откройте фотосессию.');}
 function nativeOwned(){return !!workerState&&!workerState.exited&&(workerState.rpc.hasOutstanding()||!workerState.rpc.snapshot().admissionOpen);}
-function cameraIdle(){if(quitting||nativeOwned()||seriesActive()||burstActive()||interval||captureActive||sessionTransition||accessoryBusy||controlBusy)throw Error('Дождитесь окончания текущей команды камеры.');}
+function cameraIdle(){if(runtimeQuarantined)throw Error(t('operation.unknown'));if(quitting||nativeOwned()||seriesActive()||burstActive()||interval||captureActive||sessionTransition||accessoryBusy||controlBusy)throw Error('Дождитесь окончания текущей команды камеры.');}
 async function cameraCommand(method,args){cameraIdle();controlBusy=true;remote?.publishState();try{return await call(method,args);}finally{controlBusy=false;remote?.publishState();}}
 function sessionIdle(allowWatcher=false){if(quitting||nativeOwned()||accessoryBusy||controlBusy||seriesActive()||burstActive()||interval||captureActive||watcher&&!allowWatcher||sessionTransition)throw Error('Остановите текущую съёмку и автоимпорт перед сменой фотосессии.');}
 const sessionsRoot=()=>path.join(process.env.FOCAL_TEST_DATA?path.join(process.env.FOCAL_TEST_DATA,'Pictures'):app.getPath('pictures'),'Apertrove');
@@ -90,6 +91,7 @@ function call(method,args={},options={}){
   const timeoutMs=options.timeoutMs??integration?.requestTimeoutMs(method)??(method==='capture'?(camera.properties.driveMode?.value===7?920000:85000):method==='importCard'?180000:['autofocus','focus'].includes(method)?30000:20000);
   if(['connect','destination','capture','importCard'].includes(method)&&!args.route)args={...args,route:transferRoute(args.folder??store.settings.captureFolder)};
   return workerState.rpc.call(method,args,{timeoutMs}).catch(error=>{
+    if(error.code==='OPERATION_UNKNOWN_TERMINATION'){runtimeQuarantined=true;lifecycleIssue('NATIVE_RESULT_UNKNOWN');}
     const key=error.code==='OPERATION_TIMEOUT'?'operation.timeout_draining':error.code==='OPERATION_BUSY'?'operation.busy':error.code==='OPERATION_STALE_SESSION'?'operation.stale':error.code==='OPERATION_UNKNOWN_TERMINATION'?'operation.unknown':error.code==='OPERATION_ADMISSION_CLOSED'?'operation.closed':null;
     if(key)error.message=t(key);throw error;
   });
@@ -97,9 +99,9 @@ function call(method,args={},options={}){
 function stopInterval(reason){if(interval){interval.cancelled=true;interval=null;emit('interval',null);if(reason)log('info',reason);}}
 function startWorker(){
   if(quitting)throw Error(t('operation.closed'));
-  if(workerChannels.size>=16)throw Error(t('operation.unknown'));
+  if(runtimeQuarantined||workerChannels.size>=16)throw Error(t('operation.unknown'));
   const generation=crypto.randomUUID(),provider=integration?.camera,source=utilityProcess.fork(provider?.entrypoint||path.join(__dirname,'camera-worker.cjs'),provider?provider.argsFor(generation):['--apertrove-generation='+generation],{serviceName:'Apertrove Camera',stdio:'pipe',env:{...process.env,APERTROVE_RECOVERY_DESTINATION:path.join(app.getPath('userData'),'unattributed-transfers'),...(provider?provider.envFor(generation):{})}});
-  let exited;const channel={generation,process:source,nativeEpoch:0,exited:false,exitPromise:new Promise(resolve=>{exited=resolve;})};
+  let exited;const channel={generation,process:source,nativeEpoch:0,sdkDir:store?.settings?.sdkDir??'',exited:false,exitPromise:new Promise(resolve=>{exited=resolve;})};
   channel.rpc=createOperationClient({generation,send:message=>source.postMessage(message),getSessionEpoch:()=>channel.nativeEpoch,onChange:()=>emit('operationState',operationState())});
   channel.consumer=createTransferConsumer({generation,register:(file,context,cameraTransfer)=>queueImport([file],false,cameraTransfer,{sessionId:context.sessionId,dest:context.destination,transfer:context}),onIssue:code=>{lifecycleIssue(code);log('error',t('operation.transfer_issue'));}});
   worker=source;workerState=channel;workerChannels.add(channel);
@@ -122,7 +124,48 @@ function startWorker(){
     else if(m.event==='frame'){const bytes=Buffer.isBuffer(m.data)?m.data:Buffer.from(m.data.buffer,m.data.byteOffset,m.data.byteLength);publishFrame(bytes);}
     else if(m.event==='log')log(m.data.level,m.data.message);
   });
-  source.on('exit',code=>{channel.exited=true;channel.exitCode=code;channel.rpc.terminate();exited(code);if(!channel.finalizing){lifecycleIssue('WORKER_EXIT_UNFENCED');void writeLifecycleDiagnostic({outcome:'UNKNOWN_TERMINATION',phase:'WORKER_EXIT'}).catch(()=>{});}if(worker!==source)return;worker=null;camera={connected:false,properties:{},error:code?'Модуль камеры был перезапущен.':null};emit('camera',camera);emit('operationState',operationState());stopInterval();if(!quitting&&code)log('error',t('operation.unknown'));});
+  source.on('exit',code=>{
+    channel.exited=true;channel.exitCode=code;channel.rpc.terminate();exited(code);
+    if(!channel.finalizing&&!channel.retiring){
+      runtimeQuarantined=true;lifecycleIssue('WORKER_EXIT_UNFENCED');
+      void writeLifecycleDiagnostic({outcome:'UNKNOWN_TERMINATION',phase:'WORKER_EXIT'}).catch(()=>{});
+    }
+    if(worker!==source)return;
+    worker=null;camera={connected:false,properties:{},error:runtimeQuarantined||code?t('operation.unknown'):null};
+    emit('camera',camera);emit('operationState',operationState());stopInterval();
+    if(!quitting&&camera.error)log('error',camera.error);
+  });
+}
+async function prepareRuntime(sdkDir,{recheck=false}={}){
+  const previous=workerState;
+  if(worker&&(recheck||previous.sdkDir!==undefined&&previous.sdkDir!==sdkDir)){
+    if(camera.connected)throw Error(t('operation.busy'));
+    previous.retirement??=createWorkerRetirement({
+      channel:previous,drainConsumers:drainTransferConsumers,
+      persist:async()=>{if(libraryBootstrap?.isReady())await persist();return true;},
+      recordDiagnostic:writeLifecycleDiagnostic,
+      onUnknown:()=>{
+        runtimeQuarantined=true;lifecycleIssue('RUNTIME_REPLACEMENT_UNKNOWN');
+        camera={...camera,error:t('operation.unknown')};emit('camera',camera);
+      }
+    });
+    previous.retirementPromise??=previous.retirement.close();
+    const receipt=await previous.retirementPromise;
+    if(receipt.outcome!=='CLOSED')throw Error(t('operation.unknown'));
+    knownCameras=[];emit('cameras',knownCameras);
+  }
+  if(quitting)throw Error(t('operation.closed'));
+  if(!worker)startWorker();
+  workerState.sdkDir=sdkDir;
+}
+async function withRuntime(command,{recheck=false}={}){
+  cameraIdle();controlBusy=true;remote?.publishState();
+  try{
+    const sdkDir=store.settings.sdkDir;
+    await prepareRuntime(sdkDir,{recheck});
+    if(quitting)throw Error(t('operation.closed'));
+    return await command(sdkDir);
+  }finally{controlBusy=false;remote?.publishState();}
 }
 async function addFiles(files,copy=true,context){
   return importer.addFiles(files,copy,context);
@@ -179,32 +222,38 @@ function installHandlers(){
     emit('settings',store.settings);
     return store.settings.onboarding;
   };
-  const connectCamera=async({cameraId,readOnly=false,savePreference,reconfigure=false}={})=>{
-    cameraIdle();controlBusy=true;remote?.publishState();
+  const chooseSdkFolder=async()=>{
+    cameraIdle();
+    if(camera.connected)throw Error(t('onboarding.camera_is_busy'));
+    controlBusy=true;remote?.publishState();
     try{
-      if(!worker)startWorker();
-      knownCameras=await call('listCameras',{sdkDir:store.settings.sdkDir});emit('cameras',knownCameras);
+      const dir=await choose(['openDirectory','createDirectory'],t('desktop.choose_sdk_folder'));
+      if(dir){store.settings.sdkDir=dir;await persist();emit('settings',store.settings);}
+      return dir;
+    }finally{controlBusy=false;remote?.publishState();}
+  };
+  const connectCamera=({cameraId,readOnly=false,savePreference,reconfigure=false}={})=>withRuntime(async sdkDir=>{
+      knownCameras=await call('listCameras',{sdkDir});emit('cameras',knownCameras);
       const selected=cameraId||knownCameras.find(c=>c.id===store.settings.preferredCameraId)?.id;
       const entry=knownCameras.find(c=>c.id===selected)||(knownCameras.length===1?knownCameras[0]:null);
       if(entry&&camera.connected&&camera.cameraId!==entry.id)await call('disconnect');
       if(quitting)throw Error(t('operation.closed'));
       if(entry&&!camera.connected&&!readOnly)await flashBridge.probe(entry.model,{force:true});
       if(quitting)throw Error('Приложение закрывается.');
-      const result=await call('connect',{sdkDir:store.settings.sdkDir,folder:store.settings.captureFolder,cameraId:selected,
+      const result=await call('connect',{sdkDir,folder:store.settings.captureFolder,cameraId:selected,
         readOnly,reconfigure,savePreference:savePreference??store.settings.savePreference});
       if(result.connected&&!readOnly){store.settings.preferredCameraId=result.cameraId;await persist();}
       return result;
-    }finally{controlBusy=false;remote?.publishState();}
-  };
+  });
   const handlers={
     boot:()=>bootApplication(),
-    listCameras:async()=>{if(!worker)startWorker();knownCameras=await cameraCommand('listCameras',{sdkDir:store.settings.sdkDir});emit('cameras',knownCameras);return knownCameras;},
+    listCameras:()=>withRuntime(async sdkDir=>{knownCameras=await call('listCameras',{sdkDir});emit('cameras',knownCameras);return knownCameras;}),
     connect:({cameraId}={})=>connectCamera({cameraId}),
     disconnect:()=>{cameraIdle();return call('disconnect');},live:a=>cameraCommand('live',a),property:a=>cameraCommand('property',a),focus:a=>cameraCommand('focus',a),autofocus:()=>{cameraIdle();focusPreview=null;emit('focusPreview',null);return cameraCommand('autofocus',{preview:store.settings.focusPreviewOnSuccess!==false});},
     flashSupport:async()=>flashAvailability(camera,camera.connected?await flashBridge.cached(camera.model):{}),
     flashPopup:async()=>{cameraIdle();if(!camera.connected)throw Error('Сначала подключите камеру.');const availability=flashAvailability(camera,{});if(!availability.canAttempt)throw Error(availability.error||'Встроенная вспышка недоступна.');const selected={model:camera.model,cameraId:camera.cameraId,wasLive:camera.live};accessoryBusy=true;remote?.publishState();try{return await withFlashConnection({disconnect:()=>call('disconnect'),popup:()=>flashBridge.popup(selected.model),reconnect:async()=>{let last;for(const pause of [150,300,600]){await new Promise(resolve=>setTimeout(resolve,pause));try{const result=await call('connect',{cameraId:selected.cameraId,sdkDir:store.settings.sdkDir,folder:store.settings.captureFolder,savePreference:store.settings.savePreference});if(result.connected)return result;last=Error(result.error||'Камера не подключена.');}catch(error){last=error;}}throw last;},restoreLive:()=>call('live',{enabled:true})},selected.wasLive);}finally{accessoryBusy=false;remote?.publishState();}},
     capture:()=>{cameraIdle();if(interval)throw Error('Сначала остановите интервальную съёмку.');return capture();},
-    chooseFolder:async({kind})=>{if(!['captureFolder','watchFolder','sdkDir'].includes(kind))throw Error('Неизвестная папка.');if((kind==='captureFolder'&&(captureActive||interval||watcher))||(kind==='watchFolder'&&watcher)||(kind==='sdkDir'&&camera.connected))throw Error('Сначала остановите текущую операцию.');const dir=await choose(['openDirectory','createDirectory'],kind==='sdkDir'?'Папка официального EDSDK x64':'Выберите папку');if(dir){if(kind==='captureFolder'){requireSession();sessionIdle();if(camera.connected)await call('destination',{folder:dir});store.sessions.find(s=>s.id===store.sessionId).captureFolder=dir;}store.settings[kind]=dir;await persist();emit('settings',store.settings);}return dir;},
+    chooseFolder:async({kind})=>{if(!['captureFolder','watchFolder','sdkDir'].includes(kind))throw Error('Неизвестная папка.');if(kind==='sdkDir')return chooseSdkFolder();if((kind==='captureFolder'&&(captureActive||interval||watcher))||(kind==='watchFolder'&&watcher))throw Error('Сначала остановите текущую операцию.');const dir=await choose(['openDirectory','createDirectory'],'Выберите папку');if(dir){if(kind==='captureFolder'){requireSession();sessionIdle();if(camera.connected)await call('destination',{folder:dir});store.sessions.find(s=>s.id===store.sessionId).captureFolder=dir;}store.settings[kind]=dir;await persist();emit('settings',store.settings);}return dir;},
     importFiles:()=>sessionAction(async()=>{requireSession();const res=await dialog.showOpenDialog(win,{title:ltext('Импорт фотографий'),properties:['openFile','multiSelections'],filters:[{name:ltext('Фотографии и RAW'),extensions:[...L.EXTENSIONS].map(s=>s.slice(1))}]});return res.canceled?null:queueImport(res.filePaths,true);},{allowWatcher:true}),
     photoDelete:a=>sessionAction(async()=>{
       const imageCache=sharp.cache();
@@ -279,11 +328,10 @@ function installHandlers(){
       ...(typeof step==='string'?{step}:{}),...(typeof topic==='string'?{topic}:{}),
       ...(typeof completed==='boolean'?{completed}:{}),...(Array.isArray(skipped)?{skipped:skipped.slice(0,7)}:{})
     }),
-    sdkEnvironment:async({recheck}={})=>{
-      if(!worker)startWorker();
-      const result=await cameraCommand('sdkEnvironment',{sdkDir:store.settings.sdkDir,recheck:recheck===true});
+    sdkEnvironment:({recheck}={})=>withRuntime(async sdkDir=>{
+      const result=await call('sdkEnvironment',{sdkDir});
       await saveOnboarding({environment:result});return result;
-    },
+    },{recheck:recheck===true}),
     cameraDiagnose:async({cameraId}={})=>{
       if(!camera.connected||cameraId&&cameraId!==camera.cameraId){
         const result=await connectCamera({cameraId,readOnly:true});
@@ -343,12 +391,15 @@ const shutdown=createShutdownCoordinator({
   stopAdmission:()=>{quitting=true;stopInterval();if(seriesActive())series.cancelled=true;const remoteOwner=remote,watcherOwner=watcher;watcher=null;const closes=[Promise.resolve().then(()=>remoteOwner?.stop()),Promise.resolve().then(()=>watcherOwner?.close())];return Promise.allSettled(closes).then(results=>{if(results.some(result=>result.status==='rejected'))throw Object.assign(Error('Admission cleanup failed.'),{code:'ADMISSION_CLOSE_FAILED'});return true;});},
   requestCancellation:async()=>{
     const channel=workerState;if(!channel||channel.exited)return;
+    if(channel.retirementPromise)return channel.retirementPromise;
     channel.rpc.cancelAll();
     if(channel.rpc.snapshot().terminated){channel.process.postMessage({type:'emergencyRelease',generation:channel.generation});return;}
     await call('burstStop',{}, {timeoutMs:1000});
   },
   fenceProducers:async({deadline})=>{
     await drainApplicationTasks();const channel=workerState;
+    if(channel?.retirementPromise){const receipt=await channel.retirementPromise;return receipt.fence;}
+    if(channel?.retirementReceipt)return channel.retirementReceipt.fence;
     if(!channel||channel.exited){if(channel&&!channel.finalizing)throw Object.assign(Error('Worker exited without a fence.'),{code:'WORKER_EXIT_UNFENCED'});return {drained:true,lastPhotoSequence:0,proof:'native-not-started',nativeStarted:false};}
     await channel.rpc.whenIdle({exclusiveOnly:false});channel.rpc.closeAdmission();
     const fence=await call('producerFence',{}, {timeoutMs:Math.max(1,deadline-Date.now())});channel.consumer.fence(fence.lastPhotoSequence);
@@ -358,7 +409,10 @@ const shutdown=createShutdownCoordinator({
   drainConsumers:async()=>{await drainApplicationTasks();return drainTransferConsumers();},
   persist:async()=>{if(libraryBootstrap?.isReady())await persist();return true;},
   closeWorker:async({deadline})=>{
-    const channel=workerState;if(!channel)return {closed:true,proof:'native-not-started',nativeStarted:false};if(channel.exited)throw Object.assign(Error('Worker exited before close acknowledgement.'),{code:'WORKER_EXIT_UNFENCED'});
+    const channel=workerState;if(!channel)return {closed:true,proof:'native-not-started',nativeStarted:false};
+    if(channel.retirementPromise){const receipt=await channel.retirementPromise;return receipt.worker;}
+    if(channel.retirementReceipt&&channel.exited)return channel.retirementReceipt.worker;
+    if(channel.exited)throw Object.assign(Error('Worker exited before close acknowledgement.'),{code:'WORKER_EXIT_UNFENCED'});
     channel.finalizing=true;const result=await call('finalizeShutdown',{}, {timeoutMs:Math.max(1,deadline-Date.now())});
     await channel.exitPromise;
     // Teardown can expose a late callback. Account it before final window exit.
@@ -366,7 +420,7 @@ const shutdown=createShutdownCoordinator({
     if(result.lastPhotoSequence!==channel.consumer.snapshot().frontier||result.observations?.hasFailures||channel.exitCode!==0)throw Object.assign(Error('Worker close remains unverified.'),{code:'WORKER_CLOSE_UNKNOWN'});
     return result;
   },
-  forceWorker:async()=>{const channel=workerState;if(!channel)return {terminated:true};if(!channel.exited){lifecycleIssue('WORKER_FORCED_TERMINATION');channel.rpc.terminate();channel.process.kill();await channel.exitPromise;}return {terminated:true};},
+  forceWorker:async()=>{const channel=workerState;if(!channel)return {terminated:true};if(channel.retirementPromise){await channel.retirementPromise;return {terminated:channel.exited===true};}if(!channel.exited){lifecycleIssue('WORKER_FORCED_TERMINATION');channel.rpc.terminate();channel.process.kill();await channel.exitPromise;}return {terminated:true};},
   recordDiagnostic:writeLifecycleDiagnostic
 });
 function freshLibrary(){return {version:2,sessionId:null,sessions:[],photos:[],settings:{captureFolder:'',watchFolder:'',sdkDir:'',autofocus:true,grid:false,autoSelect:true},presets:[

@@ -68,6 +68,7 @@
       "electron/transfer-context.cjs",
       "electron/transfer-producer.cjs",
       "electron/native-observations.cjs",
+      "electron/sdk-initialization.cjs",
       "electron/sdk-environment.cjs",
       "electron/camera-capabilities.cjs",
       "electron/shot-inspector-worker.cjs",

@@ -1,8 +1,8 @@
 // Camera commands are deliberately separate from the transport so the actual SDK
 // command IDs, capability checks and read-back behaviour can be verified without USB.
-const {PROPS,valueLabel,resolveValue}=require('./camera-values.cjs');
+const {PROPS,WHITE_BALANCE_COLOR_TEMPERATURE,valueLabel,resolveValue}=require('./camera-values.cjs');
 const COMMANDS=Object.freeze({autofocus:0x102,driveLens:0x103,shutter:4});
-const LABELS={meteringMode:'Замер экспозиции',imageQuality:"Формат снимка",driveMode:'Режим съёмки',afMode:'Режим AF',liveAfMode:'Метод Live View',iso:'ISO',aperture:'Диафрагма',shutter:'Выдержка',compensation:'Экспокоррекция',whiteBalance:'Баланс белого',pictureStyle:'Picture Style'};
+const LABELS={meteringMode:'Замер экспозиции',imageQuality:"Формат снимка",driveMode:'Режим съёмки',afMode:'Режим AF',liveAfMode:'Метод Live View',iso:'ISO',aperture:'Диафрагма',shutter:'Выдержка',compensation:'Экспокоррекция',whiteBalance:'Баланс белого',colorTemperature:'Цветовая температура',pictureStyle:'Picture Style'};
 function createCameraControl(io){
   const wait=io.wait||((ms)=>new Promise(resolve=>setTimeout(resolve,ms)));
   let active=false,autofocusing=false;
@@ -18,13 +18,17 @@ function createCameraControl(io){
   async function property({key,value}){
     return exclusive(async()=>{
       if(!Object.hasOwn(PROPS,key)||!Number.isInteger(value)||value<0||value>0xffffffff)throw Error('Некорректный параметр камеры.');
-      const p=io.refresh().properties[key];
+      const properties=io.refresh().properties,p=properties[key];
       const target=resolveValue(key,value,p?.allowed||[]);
-      if(!p?.writable||target===undefined)throw Error(`Параметр «${LABELS[key]}» недоступен в текущем режиме камеры. Проверьте режим камеры и объектив.`);
+      const colorTemperature=key==='colorTemperature';
+      const kelvinMode=()=>io.get(PROPS.whiteBalance)===WHITE_BALANCE_COLOR_TEMPERATURE;
+      if(!p?.writable||target===undefined||colorTemperature&&
+        (properties.whiteBalance?.value!==WHITE_BALANCE_COLOR_TEMPERATURE||!kelvinMode()))
+        throw Error(`Параметр «${LABELS[key]}» недоступен в текущем режиме камеры. Проверьте режим камеры и объектив.`);
       io.set(PROPS[key],target);
       for(const pause of [0,80,160,300,500,800]){
         if(pause)await wait(pause);io.ensure();
-        if(io.get(PROPS[key])===target){
+        if((!colorTemperature||kelvinMode())&&io.get(PROPS[key])===target){
           const label=valueLabel(key,target)||`0x${target.toString(16)}`;
           io.log?.('success',`${LABELS[key]}: ${label} — подтверждено камерой.`);
           return io.refresh();

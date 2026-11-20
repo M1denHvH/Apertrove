@@ -2,7 +2,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const koffi = require('koffi');
-const {PROPS,choices} = require('./camera-values.cjs');
+const {PROPS,choices,WHITE_BALANCE_COLOR_TEMPERATURE} = require('./camera-values.cjs');
 const {parseFocusInfo}=require('./focus-info.cjs');
 const {quietPeriod}=require('./capture-timing.cjs');
 const {holdShutter}=require('./shutter-latch.cjs');
@@ -17,6 +17,7 @@ const {createOperationHost,operationError}=require('./operation-lifecycle.cjs');
 const {createTransferContexts}=require('./transfer-context.cjs');
 const {createTransferProducer}=require('./transfer-producer.cjs');
 const {createNativeObservations}=require('./native-observations.cjs');
+const {createSdkInitializationGate}=require('./sdk-initialization.cjs');
 const parent = process.parentPort;
 const generation=process.argv.find(value=>value.startsWith('--apertrove-generation='))?.slice('--apertrove-generation='.length);
 if(typeof generation!=='string'||!/^[A-Za-z0-9._:-]{1,96}$/.test(generation)||!path.isAbsolute(process.env.APERTROVE_RECOVERY_DESTINATION||''))throw Error('Explicit worker generation and recovery destination required.');
@@ -24,6 +25,7 @@ const send = value => {const message=value.type==='operation'?value:{...value,ge
 let sdk, library, com, dllDirectory, bindings, camera=null, initialized=false, live=false, callbacks=[], timer, cardRefs=new Map(), captureWait=null, destination='', shuttingDown=false;
 let sessionEpoch=0, sessionOpened=false, restricted=false, evidence={}, environmentChecks=[], evfRestore=null;
 let nativeStarted=false,producersFenced=false,photoSequence=0,teardownUncertain=false,currentOperation=null;
+const initializationGate=createSdkInitializationGate();
 const observations=createNativeObservations(),transfers=createTransferContexts({recoveryDestination:process.env.APERTROVE_RECOVERY_DESTINATION,newId:randomUUID});
 transfers.setRoute({sessionEpoch,sessionId:null,destination:''});
 function observed(method,phase,fn,kind='error-code'){
@@ -59,14 +61,20 @@ function releaseSdk() {
 }
 function load(custom) {
   if(teardownUncertain)throw operationError('OPERATION_UNKNOWN_TERMINATION','Native cleanup could not be acknowledged.');
-  if(sdk) return;
-  environmentChecks=sdkCandidates(custom);
-  for(const entry of environmentChecks){
-    if(entry.architecture!==process.arch){entry.result='architecture';continue;}
-    try{loadCandidate(entry.file);entry.result='ready';break;}
-    catch(error){entry.result='error';entry.error=error.message;if(!releaseSdk())throw operationError('OPERATION_UNKNOWN_TERMINATION','Native cleanup could not be acknowledged.');}
+  if(initialized) return;
+  if(!initializationGate.attempted){
+    environmentChecks=sdkCandidates(custom);
+    for(const entry of environmentChecks){
+      if(entry.architecture!==process.arch){entry.result='architecture';continue;}
+      try{loadCandidate(entry.file);entry.result='ready';return;}
+      catch(error){
+        entry.result='error';entry.error=error.message;
+        if(!releaseSdk())throw operationError('OPERATION_UNKNOWN_TERMINATION','Native cleanup could not be acknowledged.');
+        if(initializationGate.attempted)break;
+      }
+    }
   }
-  if(!sdk)throw Error(environmentChecks.some(entry=>entry.result==='error')?'Не удалось загрузить SDK Canon. Проверьте зависимости DLL и папку установки.':'Совместимая EDSDK.dll не найдена. Установите ПО Canon или укажите папку официального SDK.');
+  throw Error(environmentChecks.some(entry=>entry.result==='error')?'Не удалось загрузить SDK Canon. Проверьте зависимости DLL и папку установки.':'Совместимая EDSDK.dll не найдена. Установите ПО Canon или укажите папку официального SDK.');
 }
 function loadCandidate(file) {
   nativeStarted=true;
@@ -114,7 +122,8 @@ function loadCandidate(file) {
   try{sdk.volume=fn('EdsGetVolumeInfo','uint32',['void *',koffi.out(koffi.pointer(VolumeInfo))]);}catch{}
   const exported=name=>{try{fn(name,'uint32',[]);return true;}catch{return false;}};
   sdk.exports={volume:!!sdk.volume,propertyDescEx:exported('EdsGetPropertyDescEx'),framePoint:exported('EdsSetFramePoint')};
-  check(sdk.init(),'Инициализация EDSDK'); initialized=true;state.sdkPath=file;
+  // Canon allows one initialization cycle per process, including a failed attempt.
+  initializationGate.run(()=>check(sdk.init(),'Инициализация EDSDK')); initialized=true;state.sdkPath=file;
   const objCb=koffi.register((event,obj)=>{
     if(!sdk){send({event:'transferIssue',data:{code:'CALLBACK_AFTER_SDK_CLOSE'}});return 0;}
     if(obj) {
@@ -159,6 +168,7 @@ function refresh() {
   const mode=get(0x400);state.mode=({0:'P',1:'Tv',2:'Av',3:'M',4:'Bulb',9:'Auto'})[mode]||String(mode??'—');
   if(state.working&&!restricted&&get(0x500)!==null){state.capabilities.liveView=true;state.capabilities.manualFocus=true;}
   for(const [key,id] of Object.entries(PROPS)) {
+    if(key==='colorTemperature'&&state.properties.whiteBalance?.value!==WHITE_BALANCE_COLOR_TEMPERATURE){state.properties[key]={value:null,choices:[],writable:false};continue;}
     const current=get(id);if(current===null) {state.properties[key]={value:null,choices:[],writable:false};continue;}
     const desc={};const code=sdk.desc(camera,id,desc);
     const allowed=code?[]:Array.from(desc.values||[]).slice(0,Math.max(0,Math.min(desc.count||0,128))).map(v=>v>>>0);
@@ -174,8 +184,8 @@ function listCameras({sdkDir}={}){
   }finally{if(list)sdk.release(list);}
 }
 async function sdkEnvironment({sdkDir,recheck=false}={}){
+  if(recheck)throw operationError('OPERATION_ADMISSION_CLOSED','Runtime recheck requires main-process worker replacement.');
   let error=null;
-  if(recheck&&!camera&&sdk&&!releaseSdk())throw operationError('OPERATION_UNKNOWN_TERMINATION','Native cleanup could not be acknowledged.');
   try{load(sdkDir);}catch(e){if(teardownUncertain||e.code==='OPERATION_UNKNOWN_TERMINATION')throw e;error=e.message;}
   const file=state.sdkPath;
   const version=file?await fileVersion(file):null;
