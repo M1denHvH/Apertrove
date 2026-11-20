@@ -26,13 +26,64 @@ let sdk, library, com, dllDirectory, bindings, camera=null, initialized=false, l
 let sessionEpoch=0, sessionOpened=false, restricted=false, evidence={}, environmentChecks=[], evfRestore=null;
 let nativeStarted=false,producersFenced=false,photoSequence=0,teardownUncertain=false,currentOperation=null;
 const initializationGate=createSdkInitializationGate();
+const quarantinedNativeRefs=new Set();
 const observations=createNativeObservations(),transfers=createTransferContexts({recoveryDestination:process.env.APERTROVE_RECOVERY_DESTINATION,newId:randomUUID});
 transfers.setRoute({sessionEpoch,sessionId:null,destination:''});
 function observed(method,phase,fn,kind='error-code'){
   try{const code=fn(),entry=observations.observe({operation:phase==='event-pump'?'event-pump':currentOperation?.method||'native',operationId:currentOperation?.operationId,phase,method,code,kind});if(entry.failure&&entry.count===1)send({event:'nativeObservation',data:entry});return code;}
   catch(error){observations.failure({operation:currentOperation?.method||'native',operationId:currentOperation?.operationId,phase,method,error});send({event:'nativeObservation',data:{method,phase,classification:'UNKNOWN'}});throw error;}
 }
-const transferProducer=createTransferProducer({contexts:transfers,getEpoch:()=>sessionEpoch,getSdk:()=>sdk,isConnected:()=>!!camera,download:(...args)=>download(...args),onIssue:issue=>send({event:'transferIssue',data:issue})});
+function releaseRef(ref,phase='release'){
+  if(!ref||!sdk)return true;
+  if(teardownUncertain){if(quarantinedNativeRefs.size<10000)quarantinedNativeRefs.add(ref);return false;}
+  try{
+    const count=observed('EdsRelease',phase,()=>sdk.release(ref),'reference-count');
+    if(!Number.isInteger(count)||count<0||count>0xffffffff||count===0xffffffff){
+      teardownUncertain=true;
+      if(quarantinedNativeRefs.size<10000)quarantinedNativeRefs.add(ref);
+      return false;
+    }
+    return true;
+  }catch{
+    teardownUncertain=true;
+    if(quarantinedNativeRefs.size<10000)quarantinedNativeRefs.add(ref);
+    return false;
+  }
+}
+function openCameraSession(){
+  let result;
+  try{result=sdk.open(camera);}
+  catch(error){
+    // A binding exception does not tell us whether the native call took effect.
+    observations.failure({operation:currentOperation?.method||'connect',operationId:currentOperation?.operationId,phase:'session-open',method:'EdsOpenSession',error});
+    send({event:'nativeObservation',data:{method:'EdsOpenSession',phase:'session-open',classification:'UNKNOWN'}});
+    teardownUncertain=true;
+    throw operationError('OPERATION_UNKNOWN_TERMINATION','OpenSession completion is unknown; the worker cannot safely continue.');
+  }
+  if(!Number.isInteger(result)||result<0||result>0xffffffff){
+    const error=Object.assign(Error('OpenSession returned an invalid EdsError value.'),{code:'JS_EXCEPTION'});
+    observations.failure({operation:currentOperation?.method||'connect',operationId:currentOperation?.operationId,phase:'session-open',method:'EdsOpenSession',error});
+    send({event:'nativeObservation',data:{method:'EdsOpenSession',phase:'session-open',classification:'UNKNOWN'}});
+    teardownUncertain=true;
+    throw operationError('OPERATION_UNKNOWN_TERMINATION','OpenSession returned an invalid native result; the worker cannot safely continue.');
+  }
+  if(result)check(result,'Открытие камеры');
+  sessionOpened=true;
+}
+const transferReferences=Object.freeze({
+  retain:ref=>{
+    if(!sdk)return 0xffffffff;
+    try{return observed('EdsRetain','reference',()=>sdk.retain(ref),'reference-count');}
+    catch(error){teardownUncertain=true;if(quarantinedNativeRefs.size<10000)quarantinedNativeRefs.add(ref);throw error;}
+  },
+  release:ref=>releaseRef(ref,'transfer-release')?0:0xffffffff
+});
+const transferProducer=createTransferProducer({contexts:transfers,getEpoch:()=>sessionEpoch,getSdk:()=>sdk?transferReferences:null,isConnected:()=>!!camera,download:(...args)=>download(...args),onIssue:issue=>{
+  if(issue.code==='TRANSFER_REFERENCE_RETAIN_FAILED'||issue.code==='TRANSFER_REFERENCE_RELEASE_FAILED'){
+    teardownUncertain=true;
+  }
+  send({event:'transferIssue',data:issue});
+}});
 function setDeliveryRoute({route,folder}={}){return transfers.setRoute({sessionEpoch,sessionId:route?.sessionId??null,destination:route?.destination??folder??destination});}
 let focusSample={sequence:0,status:"unknown"},focusSampleAt=0;
 let evfStream=null,evfImage=null,statsAt=performance.now(),statsFrames=0,statsBytes=0,totalFrames=0,propertyRefreshPending=false;
@@ -133,7 +184,7 @@ function loadCandidate(file) {
           try{transferProducer.admit(obj);}catch{send({event:'transferIssue',data:{code:'TRANSFER_ADMISSION_FAILED'}});}
         }
       }
-      sdk.release(obj);
+      releaseRef(obj,'callback-release');
     }
     return 0;
   },koffi.pointer(ObjectEvent));callbacks.push(objCb);
@@ -179,9 +230,9 @@ function refresh() {
 function listCameras({sdkDir}={}){
   load(sdkDir);let list=null;
   try{const out=[null];check(sdk.list(out),'Поиск камер');list=out[0];const count=[0];check(sdk.count(list,count),'Поиск камер');const items=[];
-    for(let index=0;index<count[0];index++){const ref=[null];check(sdk.child(list,index,ref),'Чтение камеры');try{const info={};check(sdk.info(ref[0],info),'Информация камеры');items.push(describeCamera(info,index));}finally{sdk.release(ref[0]);}}
+    for(let index=0;index<count[0];index++){const ref=[null];check(sdk.child(list,index,ref),'Чтение камеры');try{const info={};check(sdk.info(ref[0],info),'Информация камеры');items.push(describeCamera(info,index));}finally{releaseRef(ref[0],'camera-discovery-release');}}
     return items;
-  }finally{if(list)sdk.release(list);}
+  }finally{if(list)releaseRef(list,'camera-list-release');}
 }
 async function sdkEnvironment({sdkDir,recheck=false}={}){
   if(recheck)throw operationError('OPERATION_ADMISSION_CLOSED','Runtime recheck requires main-process worker replacement.');
@@ -192,21 +243,9 @@ async function sdkEnvironment({sdkDir,recheck=false}={}){
   return {status:file?'ready':environmentChecks.some(entry=>entry.result==='error')?'error':'missing',architecture:process.arch,file,version,checks:environmentChecks,optional:sdk?.exports||{},error};
 }
 function cameraStorage(){
-  if(!sdk.volume)return {volumes:[],code:0};
-  const volumes=[], count=[0];
-  let code=sdk.count(camera,count);
-  if(code)return {volumes,code};
-  for(let index=0;index<Math.min(count[0],16);index++){
-    const child=[null], result=sdk.child(camera,index,child);
-    if(result){code||=result;continue;}
-    try{
-      const item={};const result=sdk.volume(child[0],item);
-      if(result){code||=result;continue;}
-      const label=typeof item.label==='string'?item.label:Buffer.from(item.label||[]).toString('utf8');
-      volumes.push({...item,label:label.replace(/\0.*$/s,''),capacity:Number(item.capacity),free:Number(item.free)});
-    }finally{sdk.release(child[0]);}
-  }
-  return {volumes,code};
+  // VolumeInfo's native layout is still unverified in NATIVE_ABI_MATRIX.md.
+  // H1 must not call the optional FFI binding with a guessed struct layout.
+  return {volumes:[],code:0,unverifiedLayout:'EdsGetVolumeInfo'};
 }
 async function diagnoseCamera(){
   ensure();
@@ -265,10 +304,10 @@ async function connect({sdkDir,folder,cameraId,readOnly=false,savePreference,rec
       const c=[null];check(sdk.child(list,index,c),'Выбор камеры');
       let keep=false;
       try{const candidate={};check(sdk.info(c[0],candidate),'Информация камеры');if(describeCamera(candidate,index).id===selected.id){camera=c[0];keep=true;break;}}
-      finally{if(!keep)sdk.release(c[0]);}
+      finally{if(!keep)releaseRef(c[0],'camera-selection-release');}
     }
     if(!camera)throw Error('Список камер изменился. Повторите поиск.');
-    check(sdk.open(camera),'Открытие камеры');sessionOpened=true;sessionEpoch++;evidence={};setDeliveryRoute({route,folder});
+    openCameraSession();sessionEpoch++;evidence={};setDeliveryRoute({route,folder});
     check(sdk.objectHandler(camera,0x200,callbacks[0],null),'События снимков');
     check(sdk.propertyHandler(camera,0x100,callbacks[1],null),'События параметров');
     check(sdk.stateHandler(camera,0x300,callbacks[2],null),'События камеры');
@@ -278,9 +317,9 @@ async function connect({sdkDir,folder,cameraId,readOnly=false,savePreference,rec
     state.capabilities={capture:false,liveView:false,focus:false,manualFocus:false,import:false,reason:'Открыта сессия диагностики.'};
     log('success',`${state.model}: USB-подключение установлено.`);return readOnly?refresh():prepareWorkingSession(savePreference);
   } catch(e) {await transferProducer.drain();disconnect();state.error=e.message;status();throw e;}
-  finally {if(list) sdk.release(list);}
+  finally {if(list) releaseRef(list,'camera-list-release');}
 }
-function clearCard() {for(const ref of cardRefs.values()) sdk.release(ref);cardRefs.clear();}
+function clearCard() {for(const [id,ref] of cardRefs){if(releaseRef(ref,'card-release'))cardRefs.delete(id);}}
 function failCapture(error){if(!captureWait)return;const waiting=captureWait;captureWait=null;try{waiting.latch?.release();}catch{waiting.releaseUnknown=true;}clearTimeout(waiting.timeout);clearTimeout(waiting.settle);if(waiting.releaseUnknown)error=operationError('OPERATION_UNKNOWN_TERMINATION','Shutter release could not be acknowledged.');transfers.settleCapture(waiting.operationId,{outcome:error?.code==='OPERATION_UNKNOWN_TERMINATION'?'UNKNOWN_TERMINATION':'FAILED'});waiting.reject(error);}
 function settleCapture(){
   const waiting=captureWait;if(!waiting||waiting.latch?.isHolding())return;
@@ -301,7 +340,7 @@ function disconnect() {
       try{if(observed('EdsCloseSession','session-close',()=>sdk.close(camera))!==0)teardownUncertain=true;}catch{teardownUncertain=true;}
     }
     // Unknown close/unregister results do not justify shortening native lifetime.
-    if(!teardownUncertain){sdk.release(camera);camera=null;}
+    if(!teardownUncertain){if(releaseRef(camera,'camera-release'))camera=null;}
   }
   sessionOpened=false;restricted=false;evidence={};focusSampleAt=0;focusSample={sequence:focusSample.sequence,status:'unknown'};
   transfers.setRoute({sessionEpoch,sessionId:null,destination:''});
@@ -309,7 +348,7 @@ function disconnect() {
 }
 function ensure() {if(!camera||!state.connected) throw Error('Сначала подключите камеру по USB.');}
 function ensureWorking(){ensure();if(!state.working)throw Error('Сначала настройте рабочее подключение камеры.');}
-function releaseEvf(){if(evfImage){sdk.release(evfImage);evfImage=null;}if(evfStream){sdk.release(evfStream);evfStream=null;}}
+function releaseEvf(){if(evfImage&&releaseRef(evfImage,'evf-image-release'))evfImage=null;if(evfStream&&releaseRef(evfStream,'evf-stream-release'))evfStream=null;}
 function restoreLiveView(){
   if(!evfRestore)return;
   const {output,mode}=evfRestore;evfRestore=null;
@@ -398,7 +437,7 @@ function download(ref,folder,isCapture=false,context) {
     send({event:'photo',photoSequence:++photoSequence,data:{path:target,capture:isCapture,context:{...context,phase:'ORIGINAL_COMMITTED'}}});log('success',`Сохранено: ${path.basename(target)}`);
     if(isCapture&&captureWait){captureWait.observedTransfers++;send({event:'burstProgress',data:{shots:0,observedTransfers:captureWait.observedTransfers,confirmation:'UNVERIFIED'}});settleCapture();}
     return {path:target};
-  } finally {if(!complete) sdk.cancel(ref);if(stream)sdk.release(stream);}
+  } finally {if(!complete) sdk.cancel(ref);if(stream)releaseRef(stream,'download-stream-release');}
 }
 function capture({autofocus=true,folder,burstMs=0,route,captureId},operation){
   ensureWorking();if(state.capabilities?.capture===false)throw Error(state.capabilities.reason||'Съёмка недоступна.');if(captureWait||controls.isBusy())throw Error('Предыдущая команда камеры ещё выполняется.');destination=folder||destination;
@@ -426,7 +465,7 @@ async function listCard() {
       try {const info={};const code=sdk.dir(child,info);if(depth===0||(!code&&info.folder)){walk(child,depth+1);} else if(!code) {
         const name=(typeof info.name==='string'?info.name:Buffer.from(info.name).toString()).replace(/\0.*$/,'');
         if(/\.(jpe?g|cr2|cr3)$/i.test(name)){const id=String(items.length);items.push({id,name,size:Number(info.size)});cardRefs.set(id,child);keep=true;}
-      }}finally {if(!keep)sdk.release(child);}
+      }}finally {if(!keep)releaseRef(child,'card-item-release');}
     }
   };try{walk(camera,0);evidence.card=true;return items;}catch(error){clearCard();throw error;}
 }

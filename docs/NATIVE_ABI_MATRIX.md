@@ -16,8 +16,8 @@ Source: `electron/camera-worker.cjs`, `native-buffer.cjs`, `transfer-producer.cj
 | EdsGetDeviceInfo | void*, out DeviceInfo* | CameraRef, DeviceInfo* p43 | Caller struct buffer; U layout |
 | EdsOpenSession | void* | CameraRef p46 | Session lifetime on camera ref; R |
 | EdsCloseSession | void* | CameraRef p46 | Close before ref release; R, quiescence U |
-| EdsRetain | void* | UInt32(BaseRef) p40 | Refcount, not EdsError; 0xFFFFFFFF error sentinel; R type |
-| EdsRelease | void* | UInt32(BaseRef) p40 | Refcount incl valid zero, sentinel error; R type |
+| EdsRetain | void* | UInt32(BaseRef) p40 | Refcount, not EdsError; zero is valid, 0xFFFFFFFF sentinel is UNKNOWN; guarded in source; matching runtime ABI unverified |
+| EdsRelease | void* | UInt32(BaseRef) p40 | Refcount incl valid zero; sentinel/exception is UNKNOWN and ref is retained in bounded quarantine; matching runtime ABI unverified |
 | EdsGetPropertySize | void*, uint32, int32, out uint32*, out uint32* | BaseRef, PropertyID, Int32, DataType*, UInt32* p50 | Enum underlying width U; output size bounds source262144 |
 | EdsGetPropertyData | void*, uint32, int32, uint32, void* | BaseRef, PropertyID, Int32, UInt32, Void* p51 | Caller buffer; R widths, data format U |
 | EdsSetPropertyData | void*, uint32, int32, uint32, void* | BaseRef, PropertyID, Int32, UInt32, const Void* p54 | Caller input remains live for sync call; R |
@@ -62,7 +62,8 @@ Public p191 FocusPoint differs from legacy parser (28-byte public fields vs sour
 ## Result classes and fixes
 
 - Canon EdsError, UInt32 refcount, Win32 BOOL, HRESULT and void are separate result classes.
-- Public p40 specifies refcount error sentinel0xFFFFFFFF. Existing direct releases and transfer-producer ignore it; observation collector currently treats reference numbers as counts. **BLOCKS RELEASE** for camera/reference/transfer ownership safety claims and must be resolved before H1/H3 ownership qualification. This is not a reason to treat every nonzero count as error. Resolve matching-version sentinel policy and add focused tests. The narrow N2 lifecycle child obtains no camera/list/stream refs and does not call Retain/Release.
+- Public p40 specifies refcount error sentinel0xFFFFFFFF. Production source now distinguishes reference counts from EdsError results: zero is a valid count; the sentinel or a thrown binding call becomes UNKNOWN; failed retain does not schedule a transfer; an unacknowledged release keeps the opaque ref in bounded quarantine and blocks further native work. Focused source tests live in tests/native-production/h1-readonly.test.cjs. This removes the known source-handling defect, but does not verify the deployed Canon runtime ABI, the live camera's reference behavior, or object lifetime. H1 remains NOT RUN and must preserve/report any UNKNOWN release or session outcome; H3 transfer ownership still needs real-device qualification.
+- H1 diagnostics deliberately skip EdsGetVolumeInfo because the source VolumeInfo layout remains U; no optional volume binding is invoked until the matching runtime/header layout is qualified. DeviceInfo and PropDesc are also U, so the source-level H1 route and fake-provider results do not establish that a real camera inspection is currently ABI-qualified.
 - Public p31's one init/terminate pair conflicts with potential same-worker recheck/fallback. Matching-runtime lifecycle review is required; N2 instead makes one process/candidate/attempt.
 - Confirmed non-Canon fix: SetDllDirectoryW is 32-bit BOOL. Source now binds int32 and converts nonzero to boolean, preserving telemetry. New N2 Win32 BOOL bindings likewise use int32.
 - native-buffer uses owned V8 memory copied by msvcrt memcpy before SDK stream release. Its real pointer/ref/ABI safety still needs N2/H gates; no addon executed in N1.

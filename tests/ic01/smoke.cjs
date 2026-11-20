@@ -1,7 +1,10 @@
 'use strict';
 // Named real Electron smoke. The trusted entry installs the admitted fake provider.
-const focused=process.argv.slice(2).join(' ')==='--tier T2 --scope synthetic --allow-electron-ic01 --focus-runtime-replacement';
-if(require.main!==module||!['--tier T2 --scope synthetic --allow-electron-ic01','--tier T2 --scope synthetic --allow-electron-ic01 --focus-runtime-replacement'].includes(process.argv.slice(2).join(' '))||process.env.NODE_OPTIONS||process.env.NODE_PATH||!/^[a-f0-9]{40}$/i.test(process.env.APERTROVE_SOURCE_COMMIT||'')||!process.execArgv.includes('--no-addons')){
+const invocation=process.argv.slice(2).join(' ');
+const focusRuntime=invocation==='--tier T2 --scope synthetic --allow-electron-ic01 --focus-runtime-replacement';
+const focusH1=invocation==='--tier T2 --scope synthetic --allow-electron-ic01 --focus-h1-readonly';
+const focusLiveHistogram=invocation==='--tier T2 --scope synthetic --allow-electron-ic01 --focus-live-histogram';
+if(require.main!==module||!['--tier T2 --scope synthetic --allow-electron-ic01','--tier T2 --scope synthetic --allow-electron-ic01 --focus-runtime-replacement','--tier T2 --scope synthetic --allow-electron-ic01 --focus-h1-readonly','--tier T2 --scope synthetic --allow-electron-ic01 --focus-live-histogram'].includes(invocation)||process.env.NODE_OPTIONS||process.env.NODE_PATH||!/^[a-f0-9]{40}$/i.test(process.env.APERTROVE_SOURCE_COMMIT||'')||!process.execArgv.includes('--no-addons')){
   console.error('IC01_SMOKE_ADMISSION_REFUSED');process.exitCode=2;
 }else main().catch(error=>{console.error(error.stack||error);process.exitCode=1;});
 
@@ -91,8 +94,8 @@ async function main(){
     assert.deepEqual(test.errors,[],'Unexpected page errors in '+test.name);
     const runtimeFile=path.join(test.folder,'runtime.json');assert.ok(fs.existsSync(runtimeFile),'Missing after-close entry evidence');test.runtime=read(runtimeFile);const expectedOutcome=['persist-fault','forced-crash','runtime-crash','runtime-rotation','unknown-capture','forced-runtime'].includes(test.name)?'UNKNOWN_TERMINATION':'CLOSED';assert.equal(test.runtime.shutdown?.outcome,expectedOutcome,'Explicit shutdown outcome for '+test.name);active=null;test.app=null;
   }
-  async function check(name,run){if(focused&&!name.startsWith('D4 runtime replacement'))return;const at=Date.now();await bounded(run(),name,25000);assert.equal(denials.filter(row=>!row.expected).length,0);results.push({name,status:'PASS',elapsedMs:Date.now()-at});console.log('PASS '+name);}
-  const report={sourceCommit:process.env.APERTROVE_SOURCE_COMMIT,tier:'T2',scope:'actual Electron main/preload/renderer/utilityProcess + admitted fake provider only',command:'node --no-addons --max-old-space-size=256 tests/ic01/smoke.cjs --tier T2 --scope synthetic --allow-electron-ic01'+(focused?' --focus-runtime-replacement':''),fixtureRoot:runRoot,executable:{path:binary,sha256:admission.binary.sha256,version:admission.version,authenticode:admission.authenticode.status},sourceHashes,results,denials,spawns,connections,limits:{suiteMs:240000,maxApps:14,maxConcurrentApps:1,caseMs:25000},limitations:['No actual Canon/Koffi/EDSDK/WIA/PTP/hardware or genuine user data','Code sentinels and redirected profiles are not an OS sandbox','No package/ASAR/installer/clean-Windows or power-loss certification','Stock official Electron is unsigned; trust anchored in verified official/locked checksums']};
+  async function check(name,run){const finalInvariant=name.includes('preserves generated originals');if(focusRuntime&&!name.startsWith('D4 runtime replacement')&&!finalInvariant)return;if(focusH1&&!name.startsWith('H1 read-only')&&!finalInvariant)return;if(focusLiveHistogram&&!name.startsWith('H1 Live View histogram')&&!finalInvariant)return;const at=Date.now();await bounded(run(),name,25000);assert.equal(denials.filter(row=>!row.expected).length,0);results.push({name,status:'PASS',elapsedMs:Date.now()-at});console.log('PASS '+name);}
+  const report={sourceCommit:process.env.APERTROVE_SOURCE_COMMIT,tier:'T2',scope:'actual Electron main/preload/renderer/utilityProcess + admitted fake provider only',command:'node --no-addons --max-old-space-size=256 tests/ic01/smoke.cjs --tier T2 --scope synthetic --allow-electron-ic01'+(focusRuntime?' --focus-runtime-replacement':focusH1?' --focus-h1-readonly':focusLiveHistogram?' --focus-live-histogram':''),fixtureRoot:runRoot,executable:{path:binary,sha256:admission.binary.sha256,version:admission.version,authenticode:admission.authenticode.status},sourceHashes,results,denials,spawns,connections,limits:{suiteMs:240000,maxApps:14,maxConcurrentApps:1,caseMs:25000},limitations:['No actual Canon/Koffi/EDSDK/WIA/PTP/hardware or genuine user data','Code sentinels and redirected profiles are not an OS sandbox','No package/ASAR/installer/clean-Windows or power-loss certification','Stock official Electron is unsigned; trust anchored in verified official/locked checksums']};
   function save(code){report.exitCode=code;report.pass=results.filter(row=>row.status==='PASS').length;report.fail=results.filter(row=>row.status==='FAIL').length;report.elapsedMs=Date.now()-started;report.apps=apps.map(test=>({name:test.name,kind:test.kind,folder:test.folder,parentPid:test.parentPid,exitCode:test.process?.exitCode,signal:test.process?.signalCode,info:test.info,runtime:test.runtime,probes:test.probes||null,pageErrors:test.errors,consoleErrors:test.consoleErrors,stderr:test.stderr}));report.originals=[...physical].map(([file,before])=>({file,before,after:fs.existsSync(file)?hash(file):null}));fs.writeFileSync(path.join(qa,'smoke-results.json'),JSON.stringify(report,null,2)+'\n');}
   function killOwnedTree(test){return new Promise(resolve=>{const pid=test?.process?.pid;if(!Number.isSafeInteger(pid)||pid<1||test.process.exitCode!==null||test.process.signalCode!==null)return resolve();originalExecFile(path.join(process.env.SystemRoot||process.env.SYSTEMROOT,'System32','taskkill.exe'),['/pid',String(pid),'/T','/F'],{windowsHide:true,timeout:2500,maxBuffer:16384},()=>resolve());});}
   const hard=setTimeout(()=>{if(finishing)return;results.push({name:'hard suite deadline',status:'FAIL'});void killOwnedTree(active).finally(()=>{save(1);process.exit(1);});},240000);
@@ -194,6 +197,36 @@ async function main(){
       await call(lifecycle,'listCard');await driver(lifecycle,'workerControl','configure',{nextImport:{delayMs:350}});await rejected(call(lifecycle,'importCard',{ids:['item-1','item-2']}),'import consumer timeout');const pending=await driver(lifecycle,'snapshot');assert.equal(pending.operationState.busy,true);
       const done=await eventually(()=>driver(lifecycle,'snapshot'),state=>{const terminal=state.operationState.ledger.history.find(operation=>operation.method==='importCard');if(!terminal)assert.equal(state.operationState.busy,true,'Ownership must remain held until import checkpoint: '+JSON.stringify(state.operationState));return terminal?.state==='CANCELLED'&&!state.operationState.busy;},'cooperative cancellation terminal');assert.ok(done.operationState.ledger.history.some(operation=>operation.method==='importCard'&&operation.state==='CANCELLED'));
       const provider=await driver(lifecycle,'workerControl','snapshot');assert.equal(provider.nativeCalls,0);assert.ok(provider.references.every(value=>value===0));assert.equal(provider.denials.filter(item=>!item.expected).length,0);await close(lifecycle);
+    });
+    const h1Readonly=fixture('h1-readonly');
+    await check('H1 read-only diagnosis uses one non-working connection and no mutating camera command',async()=>{
+      await launch(h1Readonly);await call(h1Readonly,'boot');
+      const cameras=await call(h1Readonly,'listCameras');assert.equal(cameras.length,1);
+      const report=await call(h1Readonly,'cameraDiagnose',{cameraId:cameras[0].id});
+      assert.equal(report.working,false);assert.equal(report.model,'IC01 Synthetic Camera');assert.ok(Array.isArray(report.rows));
+      const state=await driver(h1Readonly,'snapshot'),worker=await driver(h1Readonly,'workerControl','snapshot');assert.equal(state.camera.working,false);assert.equal(state.camera.saveTo,null);assert.equal(state.settings.onboarding.report.model,'IC01 Synthetic Camera');assert.equal(worker.h1.readOnlyConnects,1);assert.equal(worker.h1.workingConnects,0);assert.equal(worker.h1.diagnoses,1);
+      assert.equal(worker.nativeCalls,0);assert.equal(worker.references.length,0);assert.equal(worker.files.length,0);assert.equal(state.photos.length,0);
+      assert.equal(worker.h1.propertyCalls,0);assert.equal(worker.h1.propertyWrites,0);assert.equal(worker.h1.captureCalls,0);assert.equal(worker.h1.liveCalls,0);assert.equal(worker.h1.autofocusCalls,0);assert.equal(worker.h1.focusCalls,0);assert.equal(worker.h1.listCardCalls,0);assert.equal(worker.h1.importCardCalls,0);assert.equal(worker.h1.readOnlyMutationAttempts,0);
+      await call(h1Readonly,'cameraEndDiagnostics');const closed=await driver(h1Readonly,'snapshot');assert.equal(closed.camera.connected,false);await close(h1Readonly);
+    });
+    const liveHistogram=fixture('live-histogram');
+    await check('H1 Live View histogram toggle updates from synthetic frames, persists, and stops cleanly',async()=>{
+      await launch(liveHistogram);await call(liveHistogram,'boot');
+      await driver(liveHistogram,'workerControl','configure',{liveView:true});
+      const cameras=await call(liveHistogram,'listCameras');assert.equal(cameras.length,1);
+      const connected=await call(liveHistogram,'connect',{cameraId:cameras[0].id});assert.equal(connected.connected,true);assert.equal(connected.capabilities.liveView,true);
+      const labels=catalogs['en-US'],capture=liveHistogram.page.locator('.sidebar').getByRole('button',{name:labels['desktop.capture'],exact:true});await capture.click();
+      await liveHistogram.page.getByRole('button',{name:'Live View',exact:true}).click();
+      const histogramToggle=liveHistogram.page.locator('.live-histogram-widget button[aria-pressed="false"]');await histogramToggle.waitFor();await histogramToggle.click();
+      await liveHistogram.page.waitForFunction(()=>document.querySelectorAll('.live-histogram-widget svg path').length>=4&&[...document.querySelectorAll('.live-histogram-widget svg path')].slice(1).every(path=>path.getAttribute('d')?.length>0),null,{timeout:7000});
+      await eventually(()=>driver(liveHistogram,'snapshot'),state=>state.settings.liveHistogramEnabled===true,'persisted histogram setting');assert.equal(read(liveHistogram.filename).settings.liveHistogramEnabled,true);
+      const frameCount=await liveHistogram.page.locator('.live-canvas').getAttribute('data-frames');assert.ok(Number(frameCount)>0);
+      const histogramPaths=await liveHistogram.page.locator('.live-histogram-widget svg path').count();assert.equal(histogramPaths,4);
+      assert.equal(await liveHistogram.page.locator('.live-histogram-note').textContent(),labels['desktop.live_histogram_software']);
+      await liveHistogram.page.getByRole('button',{name:labels['desktop.stop_live_view'],exact:true}).click();
+      await liveHistogram.page.locator('.live-histogram-widget svg').waitFor({state:'detached'});assert.equal((await driver(liveHistogram,'snapshot')).camera.live,false);
+      const worker=await driver(liveHistogram,'workerControl','snapshot');assert.equal(worker.h1.liveCalls,2);assert.equal(worker.h1.propertyWrites,0);assert.equal(worker.h1.captureCalls,0);assert.equal(worker.nativeCalls,0);
+      await close(liveHistogram);
     });
     const runtimeRotation=fixture('runtime-rotation');
     await check('D4 runtime replacement rotates after acknowledged synthetic retirement and preserves connected session on rejected recheck',async()=>{

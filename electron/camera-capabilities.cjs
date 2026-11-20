@@ -59,9 +59,9 @@ function capabilityReport({ state, read, storage, exports, restricted, evidence 
   add(focusGroup, 'driveLens', 'Электронная доводка фокуса', restricted ? 'unsupported' : mf || evf.code ? 'temporary' : evidence.driveLens ? 'ready' : 'unknown', mf ? 'Объектив в MF.' : 'Требуется совместимый объектив и доступный Live View.');
   const focus = read(0x104);
   add(focusGroup, 'focusInfo', 'Информация о точках фокуса', evidence.focusInfo ? 'ready' : readStatus(focus.code), focus.code ? `Чтение на камере · ${hex(focus.code)}. Данные могут появиться в EVF.` : 'Камера отдаёт блок FocusInfo.');
-  add(storageGroup, 'volumes', 'Носители камеры', storage.volumes.length ? 'ready' : storage.code ? readStatus(storage.code) : exports.volume ? 'temporary' : 'unknown',
-    storage.volumes.length ? `Носителей с доступной информацией: ${storage.volumes.length}` : storage.code ? `Чтение носителей · ${hex(storage.code)}` : 'SDK не вернул доступный носитель.');
-  add(storageGroup, 'cardFiles', 'Папки, файлы и импорт с карты', evidence.card ? 'ready' : storage.volumes.some(v => v.type !== 0 && [0, 2].includes(v.access)) ? 'unknown' : 'temporary', 'Проверяется при открытии импорта с карты. Диагностика не обходит весь носитель.');
+  add(storageGroup, 'volumes', 'Носители камеры', storage.volumes.length ? 'ready' : storage.unverifiedLayout ? 'unknown' : storage.code ? readStatus(storage.code) : exports.volume ? 'temporary' : 'unknown',
+    storage.volumes.length ? `Носителей с доступной информацией: ${storage.volumes.length}` : storage.unverifiedLayout ? 'Volume details were skipped because the EdsGetVolumeInfo layout is not qualified for this runtime.' : storage.code ? `Чтение носителей · ${hex(storage.code)}` : 'SDK не вернул доступный носитель.');
+  add(storageGroup, 'cardFiles', 'Папки, файлы и импорт с карты', evidence.card ? 'ready' : storage.unverifiedLayout ? 'unknown' : storage.volumes.some(v => v.type !== 0 && [0, 2].includes(v.access)) ? 'unknown' : 'temporary', storage.unverifiedLayout ? 'Card access was not probed; diagnostics do not traverse the card file tree.' : 'Проверяется при открытии импорта с карты. Диагностика не обходит весь носитель.');
   const destination=read(0xb);
   const target=destination.buffer?.length===4?destination.buffer.readUInt32LE():null;
   probe(storageGroup, 'saveTo', 'Место сохранения', destination, ({1:'Карта памяти',2:'Компьютер',3:'Карта и компьютер'})[target]||'Чтение текущего назначения');

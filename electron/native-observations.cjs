@@ -1,7 +1,7 @@
-// Pure bounded observations. A returned nonzero code is UNKNOWN, not a native
-// fatal/recoverable taxonomy. Reference counts are never treated as error codes.
-const METHODS=new Set(['EdsGetEvent','EdsCloseSession','EdsTerminateSDK','EdsSetObjectEventHandler','EdsSetPropertyEventHandler','EdsSetCameraStateEventHandler','EdsRetain','EdsRelease','EdsSendCommand','EdsDownloadComplete','EdsDownloadCancel','koffi.unregister','library.unload','CoUninitialize','SetDllDirectoryW']);
-const PHASES=new Set(['event-pump','disconnect','session-close','handlers','callback-unregister','sdk-terminate','library-unload','com-uninitialize','release','capture','cleanup','shutdown','download','reference','teardown','initialize']);
+// Pure bounded observations. A nonzero EdsError is UNKNOWN, not a native
+// fatal/recoverable taxonomy. Reference counts use their separate UInt32 contract.
+const METHODS=new Set(['EdsGetEvent','EdsOpenSession','EdsCloseSession','EdsTerminateSDK','EdsSetObjectEventHandler','EdsSetPropertyEventHandler','EdsSetCameraStateEventHandler','EdsRetain','EdsRelease','EdsSendCommand','EdsDownloadComplete','EdsDownloadCancel','koffi.unregister','library.unload','CoUninitialize','SetDllDirectoryW']);
+const PHASES=new Set(['event-pump','session-open','disconnect','session-close','handlers','callback-unregister','sdk-terminate','library-unload','com-uninitialize','release','capture','cleanup','shutdown','download','reference','teardown','initialize']);
 const OPERATIONS=new Set(['shutdown','disconnect','connect','listCameras','sdkEnvironment','diagnoseCamera','destination','live','capture','focus','autofocus','property','listCard','importCard','finalizeShutdown','event-pump','initialize','native']);
 const boundedCode=value=>typeof value==='number'&&Number.isInteger(value)&&value>=-0x80000000&&value<=0xffffffff?value:null;
 const errorCode=error=>boundedCode(error?.code)??(typeof error?.code==='string'&&/^[A-Z][A-Z0-9_]{0,47}$/.test(error.code)?error.code:'JS_EXCEPTION');
@@ -12,7 +12,7 @@ function createNativeObservations({limit=32}={}){
   function append(input,thrown=false){
     const kind=thrown?'exception':['EdsRetain','EdsRelease'].includes(input.method)||input.kind==='reference-count'?'reference-count':input.kind==='void'?'void':input.kind==='boolean'?'boolean':'error-code';
     const code=thrown?errorCode(input.error):kind==='boolean'&&typeof input.code==='boolean'?input.code:boundedCode(input.code);
-    const failure=thrown||kind==='error-code'&&code!==0||kind==='boolean'&&code!==true&&code!==1;
+    const failure=thrown||kind==='error-code'&&code!==0||kind==='reference-count'&&(code===null||code===0xffffffff)||kind==='boolean'&&code!==true&&code!==1;
     const value={operation:OPERATIONS.has(input.operation)?input.operation:'native',
       operationId:typeof input.operationId==='string'&&/^[A-Za-z0-9_.:-]{1,96}$/.test(input.operationId)?input.operationId:null,
       phase:PHASES.has(input.phase)?input.phase:'unknown',method:METHODS.has(input.method)?input.method:'UNKNOWN_METHOD',
