@@ -5,7 +5,10 @@ const fs=require('node:fs'),path=require('node:path');
 const {validate}=require('./manifest.cjs');
 const nonce=process.argv[3];
 if(require.main!==module||!process.send||process.argv.length!==4||process.argv[2]!=='--native-worker'||nonce!==process.env.APERTROVE_N2_NONCE||!/^[a-f0-9]{48}$/.test(nonce||'')||process.execArgv.join(' ')!=='--max-old-space-size=128')throw Error('N2_WORKER_ADMISSION_DENIED');
+const admissionTimer=setTimeout(()=>process.exit(2),15000);
+process.once('disconnect',()=>process.exit(2));
 process.once('message',message=>{
+  clearTimeout(admissionTimer);
   const receipt={nativeLoaded:false,canonLoadAttempted:false,initialize:null,terminate:null,unloaded:false,comBalanced:false,cleanup:'UNKNOWN'};
   try{
     if(message?.nonce!==nonce)throw Error('N2_PARENT_HANDSHAKE_DENIED');
@@ -48,4 +51,4 @@ process.once('message',message=>{
   const ok=receipt.cleanup==='SOURCE_ZERO'&&receipt.initialize===0&&receipt.terminate===0;
   process.send({type:'result',nonce,receipt},()=>process.exit(ok?0:1));
 });
-process.send({type:'ready',nonce});
+process.send({type:'ready',nonce,pid:process.pid});

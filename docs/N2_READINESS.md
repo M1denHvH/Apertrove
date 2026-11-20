@@ -1,68 +1,104 @@
-# N2 readiness — N1.5
+# N2 admission closure
 
-Status: PARTIAL. The refreshed PSE runtime is a statically inspected x64 candidate. No Canon DLL or Koffi addon was loaded, and the real N2 cycle was not authorized or run.
+Статус milestone: BLOCKED_VENDOR_OR_LICENSE. Технические pre-execution gates reviewed, dry-run ready:true. Источник/регион и applicable Canon permission на сторонний init-only experiment не подтверждены. Реальное native execution — NOT RUN, отдельного разрешения нет. Предыдущие N1/N1.5 evidence сохранены; этот этап использует qa/native-n2-admission/.
 
-## Updated PSE identity
+## Точная граница
 
-PSEditor.exe at C:\Program Files\Canon\Picture Style Editor\PSEditor.exe is version 1.33.10.0, x64, Canon Authenticode Valid, SHA-256 b4f3f47b24a2b90ac43fb7491d65c98cc2ddb305a83018297c2c19bfdb5fead1. Its EDSDK.dll at C:\Program Files\Canon\Picture Style Editor\EDSDK.dll is x64, FileVersion/ProductVersion 3.18.40.0, 1,522,576 bytes, Canon Authenticode Valid, SHA-256 35c5fd7564cf8eee3bc41004a0ab21d96caccb36ea1a1ddb512caf7b1c046627.
+Baseline bceefcd0d2d26009346ccd312d7aeab7895b7ee9, ветка feat/native-n2-admission. Цель — один новый Windows x64 процесс, одна конкретная DLL, один EdsInitializeSDK и EdsTerminateSDK только после нулевого init. Никакого автоматического fallback, повторного init, enumeration, session, callbacks, Live View, shutter, файлов камеры или H1/H2/H3.
 
-The old N1 EDSDK hash dbebe8a3d415414a4accf822027165fbbf947f25bb6ba68ebbaa1ec0a0fbc019 has not been found in the inspected Canon install roots. Current file has same version and size but different bytes. We cannot attribute the difference to implementation change or signing-only change. The fresh inventory is qa/native-n2-prep/runtime-pse-inventory.json and is git-ignored. EDSDK exports are 129 names and ordinals, with all 31 production worker names and both lifecycle names. Direct imports matched 198 imported symbols to eight x64 System32 export candidates; all direct candidates/signatures were checked. Dynamic loads, recursive forwarders/API sets, sibling transitive closure, DllMain and initializer side effects remain unknown.
+Текущий кандидат: C:\Program Files\Canon\Picture Style Editor\EDSDK.dll из PSE 1.33.10.0. FileVersion/ProductVersion 3.18.40.0, PE x64, 1,522,576 байт, Authenticode Valid / Canon Inc. SHA-256:
 
-## Official SDK and ABI boundary
+    35c5fd7564cf8eee3bc41004a0ab21d96caccb36ea1a1ddb512caf7b1c046627
 
-Canon EDSDK reference 13.20.11 was retrieved from a Canon-linked public source in N1. Its p.39 and sample1 pp.193–194 support parameterless init/terminate, a process-level pair, and terminating only after successful initialization. The manual does not establish that this PSE DLL is the matching build. Canon release history links API releases to dates and capabilities but does not publish this installed file hash mapping. Matching public headers, exact Canon runtime mapping and a usable package license were not obtained.
+Хеш отличается от исторического N1 при одинаковом FileVersion. Старые манифесты не годятся ни по DLL, ни по изменившимся source hashes. Повторять широкую инвентаризацию не требуется; текущая identity перепроверена чтением байтов.
 
-Canon public references: the official [PSE download page](https://asia.canon/en/support/0200774903), [EDSDK release notes](https://asia.canon/en/campaign/developerresources/camera/cap/edsdk-eos-digital-camera-sdk-release-note), and [Canon Europe Developer Portal](https://developers.canon-europe.com/developers/s/login/). The Asia EDSDK catalogue and reference do not publish a mapping from this installed DLL hash to a header package.
+## Пять инженерных gate-решений
 
-PSE application version, DLL FileVersion and SDK package version are distinct. The number 3.18.40.0 alone is not proof of a Canon EDSDK package match. The Canon Asia PSE product-download page states regional personal/non-commercial terms and restrictions on redistribution and reverse engineering for that download. These regional PSE terms are not an EDSDK package license and should not be generalized to other regions. Do not ship Canon binaries or present PSE installation as a redistribution license. Official sources: Canon's [PSE 1.33.10 download page](https://asia.canon/en/support/0200774903), [EDSDK release notes](https://asia.canon/en/campaign/developerresources/camera/cap/edsdk-eos-digital-camera-sdk-release-note), and [Europe Developer Portal](https://developers.canon-europe.com/developers/s/login/). The official Asia SDK page lists SDK package versions, but does not map the installed DLL hash. After signing in personally, obtain the official Windows SDK headers, license/readme and release notes or request written mapping for the exact PSE-shipped DLL. No account, credentials or legal terms were handled here.
+| Gate | Предварительное решение | Что не утверждается |
+| --- | --- | --- |
+| Canon lifecycle ABI | VERIFIED_LIFECYCLE_SUBSET для двух no-arg функций. Сохраняется review N1.5 по public reference 13.20.11 p39/sample1 pp193–194 и точным exports | Нет полного ABI или Canon mapping этого PSE SHA к package 13.20.11/13.21.10 |
+| Lifecycle order | Один отдельный процесс/attempt. Terminate только после init=0. Неуверенная очистка завершается процессом, повторов нет | Не доказаны vendor-internal cleanup или успешный native cycle |
+| Dependency paths | STATIC_PATHS_REVIEWED. Точные PSE sibling bytes, 13 System32 PE identities и evidence hash проверяются admission | Dynamic dependencies остаются NOT_RUN, полной динамической closure нет |
+| Native addon | Koffi 2.16.3 x64 совпал с member официального npm tarball и lock SHA-512. Точный addon hash pinned | Addon не загружался; это review identity/source boundary, не исполнение ABI |
+| Initialization plan / containment | INITIALIZATION_PLAN_REVIEWED после 13/13 synthetic Job Object tests и observer checks. План и test report pinned | Реальные init effects, module/thread/device/service deltas — NOT_RUN |
 
-Narrow lifecycle assessment: the existing child binds only EdsInitializeSDK and EdsTerminateSDK, with no structures, object references, callbacks or camera calls. The reviewed reference and candidate exports justify preparing a lifecycle-subset review; they do not justify full runtime ABI, model coverage or hardware claims. The fresh manifest records the vendor decision as VERIFIED_LIFECYCLE_SUBSET and the conditional terminate ordering as reviewed, limited to the documented public API contract plus the two export names. This is not Canon confirmation that reference 13.20.11 matches the installed DLL. The exact runtime/version correspondence remains unresolved.
+Schema 2 отделяет предварительное решение от runtimeObservations. В dry-run они всегда NOT_RUN, даже при ready:true. Готовность не предоставляет право запуска. Legacy schema 1 и исторические booleans не принимаются. Изменение evidence, System32 bytes, sibling set, Node, addon или исполняемого source требует нового манифеста.
 
-The official Developer Portal requires personal account access for the SDK package. Use the appropriate regional registration and verify eligibility. No sign-in or form submission was attempted.
+## Dependencies и загрузчик
 
-## Admission gates
+Свежий bounded review находится в ignored dependency-preflight.json. EDSDK имеет 129 named exports и 213 direct import entries: 198 имён и 15 WS2_32 ordinals. Все прямые entries сопоставлены. Delay imports отсутствуют. 18 imported exports перенаправлены через NTDLL/API-set контракты. Текущие Windows host candidates и их exports проверены статически. Точная runtime-resolution API-set alias ещё не наблюдалась; отсутствующий отдельный файл api-ms-* сам по себе не означает missing dependency.
 
-| Gate | N1.5 evidence and disposition |
+EdsImage.dll и EdsCFParse.dll — подписанные x64 Canon siblings. Их imports и Windows candidates проверены. Embedded строки EdsImage/EdsPsf/mscoree — подсказки, а не доказательство вызова init-only path. EdsPsf рядом отсутствует, но его lifecycle-зависимость не показана. Конкретной отсутствующей direct/delay dependency не выявлено.
+
+Search boundary: абсолютный addon, абсолютные System32 kernel32/ole32, абсолютная PSE EDSDK. SetDefaultDllDirectories допускает только System32 и AddDllDirectory точного PSE каталога. Canon LoadLibraryExW использует SYSTEM32 | DLL_LOAD_DIR. PATH состоит из System32; рабочая и profile папки disposable и не добавлены в DLL search. Вложенный DPP4Lib, EOS Utility, Webcam и Network Tool не добавляются и не используются как fallback.
+
+PSE file/directory, Canon и Program Files parents проверены по DACL/SID, reparse-флагам и Authenticode. Before snapshot повторяет эти проверки и сравнивает ACL hashes с pinned dependency evidence до доставки манифеста worker. Это защищает от наблюдаемых write-grants обычным пользователям, но не исключает privileged administrator replacement, loader TOCTOU или способность самого vendor native code изменять свой процесс. Addon лежит в пользовательском каталоге и защищён byte pinning, не DACL. Его два прямых Windows imports — KnownDLLs KERNEL32/ADVAPI32.
+
+## Ограниченная внешняя supervision
+
+Controller остаётся addon-free. Отдельный pinned addon-free Node supervisor-host создаётся detached, hidden и сохраняет работу после смерти controller. Он запускает встроенный Windows PowerShell 5.1, который владеет единственным non-inherited handle неназванного Windows Job Object с KILL_ON_JOB_CLOSE; breakaway не разрешается.
+
+До любого require Koffi worker отправляет pid/nonce ready и ждёт admission. Supervisor проверяет image path, parent PID, nonce в command line и creation time; затем сопоставляет открытый process handle с этими данными и сохраняет именно этот handle. Только подтверждённый AssignProcessToJobObject разрешает controller отправить manifest. Отказ — остановка без native load. Смерть controller до assignment закрывает IPC, у ожидающего worker есть admission timeout.
+
+15 секунд от delivery — lifecycle deadline. Затем TerminateProcess по сохранённому root handle, ограниченное ожидание, TerminateJobObject для дерева и повторные process/job queries. Kill request не равен exit. Clean требует Node close, signaled root handle и activeProcesses=0. Любой timeout или forced termination исключает SOURCE_ZERO_CYCLE. Короткоживущие descendants выявляются также cumulative totalProcesses; они не разрешены даже если live PID polling их пропустил.
+
+Не подтверждённое дерево даёт UNKNOWN/exit3. При подтверждённом handoff внешний supervisor продолжает cleanup не дольше указанного в receipt срока, затем TerminateJobObject, ограниченный query grace и закрытие kill-on-close job. В файле сохраняются PID/job state/deadline. Сам supervisor имеет 60s монотонный hard deadline, host — 65s timer плюс 500ms kill fallback и максимум 750ms output flush. Закрытие job handle запрашивает OS termination, но не доказывает конечное завершение заблокированного kernel I/O. UNKNOWN запрещает следующий attempt до проверки конкретных PID. Нет бесконечного ожидания controller и скрытого оставления нативного процесса.
+
+## Выполнимый план наблюдений
+
+observe-control.cjs управляет встроенным observe-n2.ps1 без Canon/Koffi, camera handles и обычного application entrypoint.
+
+- Before: Windows build/architecture, runtime SHA/version/signature/DACL, relevant Canon processes/services, passive Camera/Image PnP inventory и доступные TCP/UDP endpoints заданных PID. Неуспех необходимых sections останавливает admission.
+- During: ограниченные по времени/объёму периодические module paths, threadCount, handleCount и startTime для root и observed Job PID. Неподтверждённые section/module reads остаются UNKNOWN. Неожиданное дерево запрашивает Job termination.
+- After: повторные runtime/trust/process/service/device/endpoint snapshots. observation-review.cjs сравнивает состояния в обе стороны и показывает unexpected module locations, persistent Canon processes, service/device changes и сетевые endpoints.
+
+Модули разрешены по точным pinned Node/addon/PSE sibling paths и непосредственному System32. Остальные пути требуют review; расположение не подтверждает безопасность кода. Нет readable root sample, truncation, unknown module path, изменившиеся trust/bytes или неожиданные effects не дают чистый результат.
+
+Samples не являются packet/USB/RPC tracing. Они могут пропустить кратковременную загрузку, service call, network connection или device open. handleCount не показывает содержимое kernel handles. Init/DllMain могут общаться с уже существующими Canon components без enumeration. Job Object не sandbox и не включает внешние services, запущенные иным владельцем. Остаточный риск должен входить в отдельное разрешение на единственный bounded experiment.
+
+## Canon terms и требуемое действие человека
+
+Публичная [Canon Asia PSE download page](https://asia.canon/en/support/0200774903) описывает региональные personal/non-commercial terms и ограничения на распространение/reverse engineering. Это не вывод о правах по иной региональной EULA и не разрешение на использование PSE DLL сторонним приложением. Установленный readmeLicensePSE.txt содержит IJG acknowledgments; он не устанавливает EDSDK development rights.
+
+Регион происхождения установленного PSE и применимое разрешение на сторонний lifecycle experiment пока не подтверждены. Пользователю нужно назвать источник/регион установки и проверить согласованную EULA либо получить у Canon подтверждение возможности вызвать EdsInitializeSDK/EdsTerminateSDK из отдельного стороннего процесса. Если такое разрешение требует developer registration, пользователь проходит её сам. Terms не принимаются агентом; DLL/headers не распространяются.
+
+Отсутствие exact matching headers не делает двухфункциональный subset полным ABI и не добавляет автоматический technical blocker сверх уже документированного narrow experiment. Canon [Developer Portal](https://developers.canon-europe.com/developers/s/login/) остаётся путём для matching package, licenses и последующей широкой ABI/H1 квалификации.
+
+## Production lifecycle и PSE-first migration
+
+Production не изменён. camera-worker.load() может перейти к другому кандидату после init failure, а sdkEnvironment({recheck:true}) способен terminate/reinitialize в том же worker. До H1 нужно минимально оградить повторный init и выполнять новый candidate/recheck в свежем процессе с подтверждённой остановкой предыдущего. Эта отдельная работа не блокирует N2 в независимом one-attempt worker.
+
+После фактического N2, production correction и H1 evidence выполнить согласованную миграцию:
+
+| Файлы | Изменение |
 | --- | --- |
-| Canon lifecycle subset | Scoped to PSE file identity plus public lifecycle contract and the two required export names. Not a full package-to-binary mapping or full ABI proof. |
-| Lifecycle order | The runner makes one init attempt, calls terminate only after init returns zero, and does not retry or change DLL. Reviewed subset only. |
-| Dependency closure | BLOCKED. Immediate static imports resolve to reviewed x64 Windows candidates. Recursive OS forwarders/API sets, dynamic loads and all initialization-time effects are not closed. |
-| Native addon review | Statically reviewed. package-lock integrity matches the official registry tarball SHA-512, and the local x64 Koffi addon exactly matches its tarball member. Direct imports are KERNEL32.dll and ADVAPI32.dll. It has not been executed. |
-| Initialization effects | BLOCKED. DllMain and SDK initialization may load dynamic modules, start threads, or access services/devices. Requires the separately authorized isolated N2 run and before/after observation. |
+| README.md / README.ru.md step 3 | PSE-first только для подтверждённых x64 версий, официальная Canon загрузка, условия зависят от выпуска |
+| docs/INSTALLATION.md section 3 | PSE путь, проверка architecture/version/dependencies, исключить unofficial DLL copying |
+| docs/REQUIREMENTS.md | Предпочтительный verified runtime и допустимые альтернативы отдельно |
+| docs/TROUBLESHOOTING.md | Missing DLL, dependency, wrong architecture, unsupported SDK version, init failure, no camera и unsupported feature отдельно |
+| en-US.json / ru-RU.json + Onboarding | Согласованные setup text/link/error states; EOS Utility closing advice сохранить при contention |
 
-The first two manifest decisions are scoped to the documented lifecycle subset. The static Koffi package identity review supports its addon evidence field. Dependency and effects blockers remain. Fresh manifest qa/native-n2-prep/n2-manifest-893305f0-5361-42b4-8f52-7e48caaed588.json has SHA-256 838dfb9e0b33855277747fbb3542cf0a442b2903d75a4ce71950e82ea00355ed. Its addon-free dry-run exited 0 with ready false, nativeLoaded false and blockers DEPENDENCY_CLOSURE_REVIEW_REQUIRED and INITIALIZATION_EFFECTS_REVIEW_REQUIRED.
+Текущий resolver уже обнаруживает PSE как первый имеющийся standard x64 candidate после отсутствующих x64 EOS Utility roots. После квалификации рассмотреть только перестановку PSE перед standard EOS Utility с сохранением explicit custom/EDSDK_DIR precedence, архитектурной проверки и существующих legitimate alternatives. Публичные установки/UI сейчас не переключены.
 
-## Harness and resolver
+## Evidence и запуск
 
-Existing N1 harness is retained. prepare.cjs hash is now pinned alongside manifest.cjs, run.cjs and worker.cjs. The generator and native-run artifacts write under ignored qa/native-n2-prep/. The 15-second watchdog asks Windows to terminate the exact child and retains supervision until confirmed process close. If close is not confirmed, the parent waits without a final time bound and reports no completion. This prevents an unconfirmed child from being detached, but a stuck child can leave the runner waiting indefinitely. There is no Windows Job Object supervising the parent against its own unexpected termination. Source-only tests check for removal of the early-detach branch. No native child is started by preparation or dry-run.
+Точные команды, exit codes, свежий manifest hash и independent verdict сохраняются под qa/native-n2-admission/. Все proprietary binaries/headers остаются вне Git. Только локальные коммиты; push/PR/merge/release не выполняются.
 
-The production sdkCandidates sequence checks Program Files EOS Utility roots, then Program Files Picture Style Editor, Webcam and Network Tool. Current installation has no x64 EOS Utility candidate in those roots, and installed x86 EOS Utility copies are rejected by architecture in the x64 process. PSE is therefore the first currently present standard x64 candidate in that order. No resolver code change is justified before runtime qualification.
+Свежий schema 2 manifest: n2-manifest-50423378-d347-4808-9c96-5f9238f091ef.json, SHA-256 d46669989bee4b0e96bca669ef56bae4176a14e263aad94dc87ceac2c7249574. Адресный dry-run завершился exit0, ready:true, blockers:[], nativeLoaded:false, nativeResult:NOT_RUN, authorization:NOT_GRANTED. Dynamic dependencies, initialization effects и native lifecycle остались NOT_RUN.
 
-There is a separate production-worker lifecycle blocker. camera-worker.load() can continue to another candidate after an initialization error, and sdkEnvironment({recheck:true}) can terminate and initialize again in the same worker. Canon's public reference documents one init/terminate pair per process. N1.5 leaves production unchanged because the installed runtime is not mapped to that reference and this task is limited to N2 preparation. Before a PSE-first production resolver or user-facing requirement, ensure retries and rechecks cannot initialize a different runtime again in the same process; a fresh worker attempt may be appropriate after review. After N2 proof, the minimal policy change to consider is moving the standard PSE root immediately ahead of EOS Utility roots while retaining explicit user selection and EDSDK_DIR precedence, architecture checks, exact-directory loading restrictions and existing alternatives. Validate candidate choice from installation metadata only; do not select by version-number similarity.
+Финальные проверки:
 
-## Deferred user documentation migration
+| Команда | Результат |
+| --- | --- |
+| node --no-addons --max-old-space-size=192 --test tests/native-n1/check.cjs | 12 PASS, exit0, включая schema/evidence/system-file negative tests и PE directory без named exports |
+| node --no-addons --max-old-space-size=192 --test --test-timeout=60000 tests/native-n1/watchdog.cjs | 13 PASS, exit0; exception — uncaught JavaScript exception, не Canon/access violation |
+| node --no-addons --max-old-space-size=192 qa/native-n2-admission/observer-safe-test.cjs | 12 assertions, exit0; реальные harmless addon-free процессы, Before/After sectionErrors:[] |
+| npm test | 52 PASS, exit0 |
+| npm run test:t1 | 41 PASS, exit0 |
+| npm run preflight | 280 allowlisted files, exit0 |
 
-Do not yet claim that installing PSE is a verified or sufficient Apertrove requirement. Affected user-facing text is localized: README.md and README.ru.md step 3 recommend EOS Utility or Canon developer components; docs/INSTALLATION.md section 3 does the same; docs/REQUIREMENTS.md says EOS Utility may provide a suitable local DLL. The setup UI uses onboarding.install_eos_utility_for_your_camera_or_select in en-US.json and ru-RU.json and has the onboarding.download_eos_utility link label in both locales. docs/TROUBLESHOOTING.md directs users to official Canon software for missing EDSDK. Its EOS Utility close/busy guidance remains useful for camera contention and should stay. Keep those historical instructions until N2 qualification and a validated resolver policy exist.
+Watchdog evidence включает реальные normal/nonzero/exception exits, timeout, ignored graceful request, exit/escalation race, injected failed-confirmation UNKNOWN, EOF, abrupt controller death, supervisor death, descendants и 10s idle-pipe deadline (~10.4s). Это Windows containment evidence, не native Canon success. Build/i18n/S2C не запускались: production/frontend/locales/S2C не менялись.
 
-After those conditions, synchronize English and Russian README, installation, requirements, troubleshooting and setup onboarding. Proposed factual text:
+Независимый reviewer проверил retained handles, assignment-before-admission, deadlines, bridge, UNKNOWN, dependency/effects semantics и итоговый watchdog report. Блокирующих technical findings не осталось. Applicable Canon rights и отдельная пользовательская авторизация этим review не предоставляются.
 
-English: “For camera control, install a Canon-supported x64 EDSDK package. Apertrove checks installed Canon runtimes and reports their architecture and version. Picture Style Editor may provide a compatible runtime on supported installations; available camera features depend on the camera and SDK. Obtain Canon software from Canon. Do not download or copy standalone DLLs from unofficial sources.”
-
-Russian: “Для управления камерой установите поддерживаемый Canon пакет EDSDK x64. Apertrove проверяет установленные компоненты Canon и сообщает их архитектуру и версию. В некоторых поддерживаемых конфигурациях совместимая библиотека может входить в Picture Style Editor; набор функций зависит от камеры и SDK. Загружайте ПО с сайта Canon. Не используйте отдельные DLL с неофициальных сайтов и не копируйте их в системные папки.”
-
-Keep EOS Utility as a known alternative when its installed DLL architecture is compatible. Do not promise every PSE release includes the same runtime. Defer the public migration until the PSE lifecycle candidate is qualified, the worker's same-process recheck/retry path is resolved, the resolver policy is validated and target-camera H1 evidence supports the setup claim. Canon proprietary libraries remain separately obtained and are never bundled without redistribution rights.
-
-Onboarding diagnostics should separate: missing DLL; wrong architecture (show candidate path/architecture); missing or failed dependency (show load error and candidate folder); unsupported SDK version only when a verified version policy exists; camera not detected after successful SDK initialization; camera feature unsupported only after capability probing; native initialization failure with raw Canon code. Current loader uses broad missing-or-load-failure text and does not enforce a verified SDK-version allowlist. Implement these categories after the runtime qualification, not by guessing from arbitrary Windows load-error strings.
-
-## Required safety checks before a future native N2 cycle
-
-1. Complete dependency review for this exact PSE directory and record any remaining dynamic-load boundary. Immediate import matching alone is insufficient.
-2. Review the bounded initialization-effects plan and record the baseline Windows processes/modules/handles. Ensure no camera, EOS Utility or PSE process is active before a future cycle.
-3. Verify that the relevant regional Canon terms permit the intended use. If this is unclear, request Canon confirmation. Do not accept terms on the user's behalf.
-4. After checks 1–3, obtain separate explicit authorization for exactly one N2 cycle. Generate a fresh manifest after any source/evidence change and confirm only the justified dry-run blockers.
-
-Future command after those conditions and separate explicit authorization only:
-
-node --no-addons --max-old-space-size=192 tests/native-n1/run.cjs --execute --manifest $manifest --authorize-native-n2 --camera-disconnected
-
-No N2, H1, H2 or H3 execution was authorized or performed in N1.5.
+Будущий execute требует отдельного явного разрешения пользователя, физического отключения USB/сетевых Canon камер, закрытых Canon приложений и осознанного подтверждения применимых Canon terms. Dry-run не содержит этих подтверждений и не запускает supervisor, observer или worker.

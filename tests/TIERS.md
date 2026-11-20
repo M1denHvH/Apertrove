@@ -2,6 +2,10 @@
 
 ## N1 source-only и будущий N2
 
+N2 Admission Closure продолжает N1.5 в ветке feat/native-n2-admission. Отдельные безопасные команды: node --no-addons --max-old-space-size=192 --test tests/native-n1/check.cjs и node --no-addons --max-old-space-size=192 --test tests/native-n1/watchdog.cjs. Последний запускает только reviewed addon-free synthetic Node children и встроенный Windows PowerShell Job Object supervisor, включая actual timeout, query-failure injection, controller/supervisor interruption и descendants. Это проверка Windows containment, не Canon/Koffi native ABI. Нативный worker этим тестом не импортируется.
+
+Schema 2 manifest отделяет static dependency paths и reviewed initialization plan от runtime observations NOT_RUN. Исполняемые supervisor/observer/host sources и evidence hashes pinned. run.cjs --dry-run только читает файлы и не создаёт процессов. Реальный execute требует отдельного разрешения и flags физического отключения камер, закрытых Canon clients и applicable Canon terms. Никакая готовность synthetic suite не разрешает init. Точные актуальные команды/условия — docs/N2_EXECUTION_PLAN.md; исторический N1 scope ниже сохранён.
+
 `tests/native-n1/check.cjs` запускается отдельно через `node --no-addons --max-old-space-size=192 --test tests/native-n1/check.cjs`: generated PE parser fixtures в ignored `qa/native-n1/fixtures`, addon-free child только для dry-run/admission refusal и VM-extracted production BOOL binding. Это не реальная native ABI проверка. `prepare.cjs` читает явно выбранные PE/reference bytes и создаёт UNQUALIFIED manifest; `run.cjs --dry-run` не импортирует addon и не создаёт native child. Точные команды и пять unresolved review gates — `docs/N2_EXECUTION_PLAN.md`.
 
 `worker.cjs` не самостоятельный тест и не входит в CI/npm scripts. Реальная `run.cjs --execute` требует нового явного N2 допуска, matching lifecycle/dependency/addon/effects evidence, полного manifest и физического отключения камер. N1 этот запуск не разрешает; H1/H2/H3 отдельно. Нельзя обходить vendor blocker переключением manifest booleans.

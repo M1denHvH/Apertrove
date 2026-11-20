@@ -1,58 +1,55 @@
-# N2 execution plan — one real Canon lifecycle cycle
+# N2 — one authorized lifecycle experiment
 
-**NOT EXECUTED / NOT AUTHORIZED in N1.5.** One dedicated Windows x64 Node process, one explicit DLL, one init, conditional terminate, no retries. No Electron UI, application camera-worker import, camera enumeration/session/properties/AF/EVF/capture/WIA/flash/card operations.
+Native lifecycle: NOT RUN. Этот документ не является разрешением запустить Canon или Koffi. Все актуальные условия и evidence ledger — N2_READINESS.md.
 
-## Prerequisites before any native load
+## Pre-execution admission
 
-1. Current preferred candidate for qualification is PSE 1.33.10.0 with EDSDK 3.18.40.0 x64, SHA-256 35c5fd7564cf8eee3bc41004a0ab21d96caccb36ea1a1ddb512caf7b1c046627. This is not yet a verified production runtime. EOS Utility EDSDK candidates found locally are x86.
-2. The two-function init/terminate subset was reviewed against public Canon reference 13.20.11 p.39 and sample1 pp.193–194. It does not prove this changed PSE DLL is a matching package. Obtain matching headers or a Canon statement mapping the exact installed runtime to a licensed package before broader ABI claims.
-3. Koffi 2.16.3 win32_x64 addon matches the exact official registry tarball selected by package-lock integrity; its direct PE imports are KERNEL32 and ADVAPI32. This review did not execute the addon.
-4. Dependency closure and initialization-effects gates remain open. Static import matches do not resolve recursive forwarders, dynamic loads, sibling transitive dependencies, DllMain behavior or side effects. Process/module/handle observation belongs to the separately authorized N2 cycle.
-5. Physically disconnect all camera USB/network connections; close EOS Utility and Picture Style Editor processes. Operator confirms physical condition; no software boolean proves it. Keep genuine photos/user profiles outside fixture paths.
-6. Review pinned harness sources, including the manifest generator. Every DLL sibling in the selected runtime directory is pinned; any added/changed DLL blocks admission. No install-tree writes, no proprietary Git files, no global PATH/registry changes.
+1. Использовать точный PSE EDSDK x64 SHA 35c5fd7564cf8eee3bc41004a0ab21d96caccb36ea1a1ddb512caf7b1c046627. Никаких альтернатив и повторов.
+2. Schema 2 manifest pins Node, 2.16.3 addon, весь sibling DLL set, System32 reviewed files, reference, исполняемые sources, dependency/initialization/test evidence.
+3. Vendor review остаётся VERIFIED_LIFECYCLE_SUBSET, не Canon package mapping. Init и terminate без аргументов; terminate только при init=0.
+4. Dependency decision — STATIC_PATHS_REVIEWED, dynamicObservation=NOT_RUN. Safety decision — INITIALIZATION_PLAN_REVIEWED, runtimeObservation=NOT_RUN, WINDOWS_JOB_KILL_ON_CLOSE_TESTED containment. Runtime evidence не требуется выдумывать до первого вызова.
+5. Сначала addon-free dry-run. ready:true означает только предварительную техническую готовность; nativeLoaded:false и runtimeObservations NOT_RUN обязательны.
+6. Человек подтверждает applicable Canon rights, закрывает PSE/EOS Utility/Canon clients и физически отключает Canon USB/сетевые камеры. Никакой software flag не доказывает физическое состояние.
+7. Получить отдельное явное разрешение на один init-only cycle. Если license или containment blocker не решён, остановиться до native load.
 
-## Entrypoints and manifest
+## Sources
 
-- prepare.cjs: built-in-only manifest preparation, initially unqualified, unique ignored output under qa/native-n2-prep/.
-- `manifest.cjs`: x64 PE/export/hash/complete sibling inventory and source identity checks; no native imports.
-- run.cjs: addon-free parent, dry-run or explicit execute gate, disposable output, supervised child process.
-- `worker.cjs`: exact addon path (no package loader fallback), local-only DLL search restriction, exact LoadLibraryExW(System32|DLL_LOAD_DIR), GetProcAddress for only Init/Terminate and Koffi function-pointer calls. Successful cycle releases the library/COM/search cookie; uncertainty retains dependencies until process exit.
-- `check.cjs`: source-only regression/parser/admission tests; synthetic fixtures never treated as native results.
+prepare.cjs генерирует unqualified unique manifest под ignored qa/native-n2-admission/. Старые N1/N1.5 manifests не редактировать и не переиспользовать. После любых source/evidence/binary изменений сгенерировать новый.
 
-Prepare from explicit absolute paths (PowerShell variables set by operator, no auto resolution):
+manifest.cjs выполняет только reads/hash/PE parsing. run.cjs --dry-run не запускает процессы и не загружает addon. run.cjs --execute создаёт только один worker после preflight. worker.cjs не является самостоятельным SDK тестом и не включён в npm/CI scripts.
 
-```powershell
-$env:NODE_OPTIONS=''; $env:NODE_PATH=''
-node --no-addons tests/native-n1/prepare.cjs --runtime $dll --koffi $addon --reference $pdf
-node --no-addons --max-old-space-size=192 tests/native-n1/run.cjs --dry-run --manifest $manifest
-```
+job-control.cjs, supervisor-host.cjs, job-supervisor.ps1 и supervised-process.cjs реализуют отдельную bounded Windows Job Object supervision. observe-control.cjs, observe-n2.ps1, observation-review.cjs собирают и классифицируют passive snapshots.
 
-Preparation captures exact runtime/dependency hashes, Node hash, four executable harness-source hashes, addon identity, and reference hash. Generated manifest contains five blocking review decisions by default. A dry-run exit0 means input identities validated, **not** ready/native PASS. `ready:false` and blocker list are expected until the exact N2 admission evidence supports a limited gate review. Malformed/changed identity returns2.
+## Контроль и пределы
 
-Reviewers must substantiate manifest fields with evidence before clearing them: vendorReview.status CONFIRMED_MATCH or VERIFIED_LIFECYCLE_SUBSET; initSuccessRequiresTerminate/initFailureMustNotTerminate; dependencyReview REVIEWED; koffi.reviewed; safetyReview.initializationEffectsReviewed. These fields record human engineering approval, not cryptographic vendor proof. Regenerate after source/binary changes; never simply toggle booleans to bypass missing evidence.
+Отдельный detached addon-free Node host живёт независимо от controller. Встроенный PowerShell supervisor создаёт unnamed non-inherited KILL_ON_JOB_CLOSE job, без breakaway. Проверяет исходного ребёнка по pid, parent, image, nonce marker, creation time и retained handle. До подтверждённого job assignment manifest не передаётся. До admission worker ждёт; disconnect и 15s admission timeout завершают его без native load.
 
-## Future command — only after separate explicit authorization
+Before snapshot проверяет identity/signature/DACL и отсутствие видимых Canon clients. Observer стартует до native delivery. 15s lifecycle watchdog работает вне native worker. Controller запрашивает exact-root termination, затем при необходимости whole-job termination. Каждое ожидание bounded, проверки монотонные. Root close/signaled handle и job active0 проверяются раздельно.
 
-```powershell
-node --no-addons --max-old-space-size=192 tests/native-n1/run.cjs --execute --manifest $manifest --authorize-native-n2 --camera-disconnected
-```
+При потере controller supervisor видит EOF и самостоятельно завершает job. При смерти supervisor последний job handle закрывается, что запускает Windows kill-on-close. При неполученной exit-confirmation результат UNKNOWN. Подтверждённый handoff передаёт cleanup отдельному supervisor с явным deadline, а не скрывает orphan. Hard deadline supervisor 60s и host timer 65s с 500ms fallback и не более 750ms output flush не превращаются в доказательство kernel-level cleanup.
 
-Parent validates before importing child_process. One hidden native child is launched with heap128, empty preloads, disposable APPDATA/LOCALAPPDATA/TEMP, System32-only PATH and nonce/IPC handshake. Child revalidates all identities before loading. Process-local DLL search settings die with child; global machine settings unchanged. Windows loader/known DLL/API-set internals remain an external validation concern.
+Natural exit0, ненулевой exit, crash, timeout, forced kill и UNKNOWN различаются. SOURCE_ZERO_CYCLE требует raw init0/terminate0, source cleanup receipt, natural clean process exit и подтверждённое пустое Job дерево. Descendants, unexpected module location, observation gaps/effects исключают чистый результат. Никакой retry или второй DLL.
 
-The parent watchdog requests termination at 15s and retains child-process supervision until Windows confirms close. It never detaches or reports an unconfirmed process as ended. If close is not confirmed, the parent waits without a final time bound and no successful receipt is produced; a stuck child can leave the runner waiting indefinitely. A forced kill is never clean shutdown. Any init failure, exception, timeout or terminate/unload failure stops the cycle; no attempt to recover by repeated init. Terminate only after successful init; uncertain cleanup is not disguised as success.
+## Наблюдение
 
-Receipt records load attempt (failed DllMain load remains UNKNOWN), raw COM/init/terminate codes, balanced COM/unload observations, PID, code/signal, timeout and process-ended observation. `SOURCE_ZERO_CYCLE` is only source-level return/exit evidence; native-created descendants/OS handles/quiescence are NOT independently proven. Before declaring N2 successful, compare external process/module/handle census and confirm no unexpected Canon/device effects. Keep all logs ignored.
+Before/After: Windows build/arch, target runtime SHA/version/Authenticode/DACL fingerprints, relevant Canon processes/services, passive camera-class PnP inventory и targeted endpoint snapshots. During: root/Job PID module list, thread/handle counts и process start times. PID file содержит root и observed job members; retained root handle защищает управление от PID reuse, а snapshot startTime не следует путать с kernel handle proof.
 
-## Stop and rollback
+Queries/output/time budgets bounded, failures/truncation явные. Отсутствие sampled delta не доказывает отсутствия USB/RPC/network/device effects. Job не ограничивает уже существующие services или привилегированные действия native code вне процесса. Любой residual risk включается в отдельное согласие.
 
-Mismatch/unreviewed manifest: refuse before native. Native crash/timeout/nonzero: preserve result, stop, inspect exact PID and any new Canon descendants with OS tools; do not blindly retry or free uncertain refs. Do not delete camera files or installation components. Child-owned disposable directories remain for evidence. Machine-wide settings require no rollback because none are changed. If effects exceed approved scope, user closes/restarts only the identified process/service after review.
+## Future command
 
-## Later H1/H2/H3 — plans only
+Выполнять только после закрытия технических и legal условий и отдельного явного разрешения человека:
 
-| Gate | Executable application path / bounded procedure | Required evidence and stop |
-|---|---|---|
-| H1 | Separately authorize one connected EOS2000D in a fresh app/worker with no working session. Use existing Find cameras/select actual ID, then main cameraDiagnose → connectCamera(readOnly:true) → diagnoseCamera; finish with cameraEndDiagnostics. Never normal Connect/cameraWorking | No property/capture writes; normal Connect prepares SaveTo/capacity and is excluded. Compare model/firmware/descriptors/report with guards; stop on unknown ref/session cleanup. Refcount contract gap must be resolved first |
-| H2 | Separate explicit permissions: existing Live View toggle; one supported ISO/Tv/Av write/readback at a time; AF/lens only with detected support; restore saved settings; card listing/import separately | Snapshot original settings, model+firmware+lens+SDK; bounded counts/durations agreed before run, stop on error/restore failure; no implicit shutter |
-| H3 | Separate shutter permission: exactly one supported RAW/JPEG capture into NEW synthetic session folder; SHA originals, transfer→registration; one agreed cancellation/interruption fault separately | Record SDK ACK, memory copy, write/close/flush where applicable, registration ack and camera/card state separately. Retain originals; no repeated shutter or destructive power-loss test |
+    node --no-addons --max-old-space-size=192 tests/native-n1/run.cjs --execute --manifest $manifest --authorize-native-n2 --camera-disconnected --canon-apps-closed --acknowledge-canon-terms
 
-EOS2000D is first hardware target, not a code restriction. Future compatibility rows record model/firmware/SDK/function/actual gate result; untested models remain NOT RUN. These plans reuse existing application paths and guards; they are not permission to run them now.
+$manifest должен быть абсолютным путём свежего schema 2 файла. Флаги записывают подтверждения, но не подменяют реальное разрешение или Canon лицензию. В этом milestone execute не выполняется.
+
+## Stop protocol
+
+Hash/source/DACL/signature/process baseline mismatch — отказ до native admission. Неуверенная загрузка, nonzero init/terminate, crash, timeout, helper/descendant, невозможность чтения обязательных наблюдений — сохранить output и остановиться.
+
+UNKNOWN сохраняет exact PID, supervisor/host PID, job log, requests/return codes и deadline handoff. Проверить последний supervisor final и retained process exit facts; не запускать второй attempt и не удалять evidence. Если OS termination остаётся unconfirmed, не сообщать clean cleanup и не убивать другие процессы по совпавшему старому PID.
+
+## Follow-up before H1
+
+Не повторять init или fallback внутри production camera worker. Исправление production lifecycle должно сохранить S2C ownership, native uncertainty, capability reporting и multi-model behavior. Затем отдельно разрешённый H1 read-only camera inspection. H2 writes/EVF/AF и H3 shutter/transfer требуют отдельных заданий. DATA-005, Retain/Release sentinel, SendCommand/FocusInfo ABI и ACK order не разрешаются этим двухфункциональным N2. Public README/installation/UI остаются до фактической квалификации и согласованной PSE-first миграции.
