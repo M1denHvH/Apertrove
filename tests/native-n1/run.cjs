@@ -10,9 +10,9 @@ async function main(){
   if(!path.isAbsolute(file||'')||fs.statSync(file).size>256*1024)throw Error('INVALID_MANIFEST_PATH');
   if(!process.execArgv.includes('--no-addons')||process.execArgv.some(a=>!['--no-addons','--max-old-space-size=192'].includes(a)))throw Error('ADDON_FREE_PARENT_REQUIRED');
   const bytes=fs.readFileSync(file),manifest=JSON.parse(bytes),admission=validate(manifest,{execute});
-  const summary={mode:execute?'N2_NATIVE':'N1_DRY_RUN',manifestSha256:sha(bytes),runtimeSha256:admission.dll.sha256,ready:admission.ready,blockers:admission.blockers,nativeLoaded:false,expectedBoundary:'one Node x64 child, one init, terminate only after init=0; 15s external watchdog; no retries, enumeration or camera operations'};
+  const summary={mode:execute?'N2_NATIVE':'N1_DRY_RUN',manifestSha256:sha(bytes),runtimeSha256:admission.dll.sha256,ready:admission.ready,blockers:admission.blockers,nativeLoaded:false,expectedBoundary:'one Node x64 child, one init, terminate only after init=0; 15s parent watchdog; no retries, enumeration or camera operations'};
   if(!execute){console.log(JSON.stringify(summary,null,2));return;}
-  const output=path.join(root,'qa','native-n1','n2-runs',crypto.randomUUID());fs.mkdirSync(output,{recursive:true});
+  const output=path.join(root,'qa','native-n2-prep','n2-runs',crypto.randomUUID());fs.mkdirSync(output,{recursive:true});
   for(const name of ['temp','profile'])fs.mkdirSync(path.join(output,name));
   const nonce=crypto.randomBytes(24).toString('hex');
   const system=process.env.SystemRoot;if(!system||!path.isAbsolute(system))throw Error('SYSTEM_ROOT_REQUIRED');
@@ -23,12 +23,13 @@ async function main(){
   summary.pid=child.pid;summary.nativeResult='UNKNOWN';let timedOut=false,count=0,stderrBytes=0;
   const result=await new Promise(resolve=>{
     let finished=false;
-    const finish=value=>{if(finished)return;finished=true;clearTimeout(watchdog);clearTimeout(exitBound);resolve(value);};
+    const finish=value=>{if(finished)return;finished=true;clearTimeout(watchdog);resolve(value);};
     const watchdog=setTimeout(()=>{timedOut=true;summary.killRequested=child.kill();},15000);
-    const exitBound=setTimeout(()=>{timedOut=true;child.kill();if(child.connected)child.disconnect();child.stderr.destroy();child.unref();finish({code:null,signal:null,processEnded:false});},17000);
     child.on('message',message=>{if(++count>12){child.kill();return;}if(message?.type==='ready'&&message.nonce===nonce)child.send({nonce,manifest,manifestSha256:sha(bytes)});else if(message?.type==='result'&&message.nonce===nonce)summary.receipt=message.receipt;});
     child.stderr.on('data',chunk=>{stderrBytes+=chunk.length;if(stderrBytes>8192)child.kill();});
     child.on('error',error=>{summary.spawnError=error.code;});
+    // Retain the process handle and supervision until Windows confirms close.
+    // The watchdog requests termination; an unconfirmed child is never detached as a completed run.
     child.on('close',(code,signal)=>finish({code,signal,processEnded:true}));
   });
   Object.assign(summary,{...result,timedOut,stderrBytes,nativeLoaded:summary.receipt?.nativeLoaded??'UNKNOWN'});

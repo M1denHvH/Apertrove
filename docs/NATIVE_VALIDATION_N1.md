@@ -42,6 +42,20 @@ Version resource не равен номеру публичного SDK package. 
 
 ## Проверка и evidence
 
-Новый `tests/native-n1/check.cjs` — source-only Node tests с generated PE parser fixtures и extracted worker prefix; не native ABI tests. `prepare.cjs` и `run.cjs --dry-run` проверяют actual selected file identities без load. PSE используется только как x64 **dry-run example**, не назначенный native provider.
+Новый tests/native-n1/check.cjs — source-only Node tests с generated PE parser fixtures и extracted worker prefix; не native ABI tests. prepare.cjs и run.cjs --dry-run проверяют actual selected file identities без load. Updated PSE DLL — предпочтительный кандидат для квалификации, не утверждённый production resolver provider.
 
-Фактические commands/exits/source hashes/review определяются ignored `qa/native-n1/verification-ledger.json` и `independent-review.md`. Неисполненные N2/H1/H2/H3, native struct sizeof/ABI/callback и OS handle checks не получают PASS. Никаких push/merge/release в N1.
+Фактические commands/exits/source hashes/review определяются ignored qa/native-n1/verification-ledger.json и ignored qa/native-n2-prep/ в этой ветке. Неисполненные N2/H1/H2/H3, native struct sizeof/ABI/callback и OS handle checks не получают PASS. Push/merge/release не выполнялись.
+
+## N1.5 addendum — current Picture Style Editor
+
+20 ноября 2026 года повторно проверена установленная PSE 1.33.10.0. PSEditor.exe is x64, SHA-256 b4f3f47b24a2b90ac43fb7491d65c98cc2ddb305a83018297c2c19bfdb5fead1, with a valid Canon Inc. Authenticode signature. Its EDSDK.dll is x64, File/ProductVersion 3.18.40.0, 1,522,576 bytes, SHA-256 35c5fd7564cf8eee3bc41004a0ab21d96caccb36ea1a1ddb512caf7b1c046627, also validly signed by Canon Inc.
+
+Version and size match the N1 PSE record, but the DLL hash differs. No trusted old copy with the N1 hash was found in checked Canon roots. The updated bytes are confirmed, while whether the change is code or signature-only remains UNKNOWN. The old hash is historical and is not used for admission. Fresh byte-only evidence for the PSE tree, sibling DLLs, versions, imports, exports and signatures is in ignored qa/native-n2-prep/runtime-pse-inventory.json. Sibling EdsImage.dll and EdsCFParse.dll also changed. EOS Utility EDSDK candidates remain x86 and cannot load into the x64 process.
+
+The current DLL has the same 129 export names and ordinals as the N1 snapshot, including all 31 worker symbols and both lifecycle export names. Export presence is not ABI compatibility. Its direct PE import entries were matched against exports of eight x64 System32 candidates. Windows forwarder/API-set recursion, dynamic loads, sibling transitive dependencies, DllMain behavior and initialization effects remain UNKNOWN; the dependency and effects admission gates remain open.
+
+The official public Canon reference 13.20.11 supports a narrow lifecycle-order assessment for the two-function init-only N2 scope. It does not map that package to the refreshed DLL SHA or replace matching headers. The manifest does not claim full ABI or camera compatibility.
+
+Koffi 2.16.3 was reviewed statically: the local x64 addon SHA-256 1305fdf18bcb5e71c1cd0530cd0834b9858beb01606f58086e587343809bfa3b exactly matches win32_x64/koffi.node in the official npm registry tarball whose SHA-512 matches package-lock integrity. The addon directly imports only KERNEL32.dll and ADVAPI32.dll. Neither it nor any Canon binary was executed.
+
+The N2 manifest now pins prepare.cjs with the manifest, runner and worker. On the 15-second watchdog, the parent requests child termination and retains process supervision until Windows confirms close. It no longer detaches after a fixed 17-second bound. An unconfirmed process remains supervised/UNKNOWN, never a completed run.

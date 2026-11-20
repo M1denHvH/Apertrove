@@ -1,21 +1,21 @@
 # N2 execution plan — one real Canon lifecycle cycle
 
-**NOT EXECUTED / NOT AUTHORIZED in N1.** One dedicated Windows x64 Node process, one explicit DLL, one init, conditional terminate, no retries. No Electron UI, application camera-worker import, camera enumeration/session/properties/AF/EVF/capture/WIA/flash/card operations.
+**NOT EXECUTED / NOT AUTHORIZED in N1.5.** One dedicated Windows x64 Node process, one explicit DLL, one init, conditional terminate, no retries. No Electron UI, application camera-worker import, camera enumeration/session/properties/AF/EVF/capture/WIA/flash/card operations.
 
 ## Prerequisites before any native load
 
-1. Obtain licensed matching headers/reference/release notes and runtime mapping through Canon. Installed EOS Utility EDSDK files are x86; do not load into x64. Supply compatible EOS Utility x64 or explicitly authorize a qualified alternate. PSE3.18.40.0 is only a dry-run example, no automatic fallback.
-2. Review exact no-argument lifecycle prototypes, uint32 EdsError, Windows x64 calling convention, successful-init conditional terminate (public13.20.11 p39/sample1), and no reinit. Document version identity or supported narrow lifecycle subset; do not equate export names with ABI.
-3. Review exact Koffi2.16.3 win32_x64 addon hash/source/import dependencies and Node executable hash. This N1 does not authorize its execution.
-4. Complete dependency and initialization-effects review. Static import list is not complete dynamic closure; record Windows version, Canon processes/services and before/after OS process/handle/module observations. Initialization/DllMain may access devices/services or start native threads even without enumeration. Obtain explicit consent for these effects.
-5. Physically disconnect all camera USB/network connections; close EOS Utility/tray ownership. Operator confirms physical condition; no software boolean proves it. Keep genuine photos/user profiles outside fixture paths.
-6. Review pristine harness sources and manifest hashes. Every DLL sibling in selected runtime directory is pinned; any added/changed DLL blocks admission. No install-tree writes, no proprietary Git files, no global PATH/registry changes.
+1. Current preferred candidate for qualification is PSE 1.33.10.0 with EDSDK 3.18.40.0 x64, SHA-256 35c5fd7564cf8eee3bc41004a0ab21d96caccb36ea1a1ddb512caf7b1c046627. This is not yet a verified production runtime. EOS Utility EDSDK candidates found locally are x86.
+2. The two-function init/terminate subset was reviewed against public Canon reference 13.20.11 p.39 and sample1 pp.193–194. It does not prove this changed PSE DLL is a matching package. Obtain matching headers or a Canon statement mapping the exact installed runtime to a licensed package before broader ABI claims.
+3. Koffi 2.16.3 win32_x64 addon matches the exact official registry tarball selected by package-lock integrity; its direct PE imports are KERNEL32 and ADVAPI32. This review did not execute the addon.
+4. Dependency closure and initialization-effects gates remain open. Static import matches do not resolve recursive forwarders, dynamic loads, sibling transitive dependencies, DllMain behavior or side effects. Process/module/handle observation belongs to the separately authorized N2 cycle.
+5. Physically disconnect all camera USB/network connections; close EOS Utility and Picture Style Editor processes. Operator confirms physical condition; no software boolean proves it. Keep genuine photos/user profiles outside fixture paths.
+6. Review pinned harness sources, including the manifest generator. Every DLL sibling in the selected runtime directory is pinned; any added/changed DLL blocks admission. No install-tree writes, no proprietary Git files, no global PATH/registry changes.
 
 ## Entrypoints and manifest
 
-- `tests/native-n1/prepare.cjs`: built-in-only manifest preparation, always UNKNOWN/unreviewed, unique ignored output.
+- prepare.cjs: built-in-only manifest preparation, initially unqualified, unique ignored output under qa/native-n2-prep/.
 - `manifest.cjs`: x64 PE/export/hash/complete sibling inventory and source identity checks; no native imports.
-- `run.cjs`: addon-free parent, dry-run or explicit execute gate, disposable output, external watchdog.
+- run.cjs: addon-free parent, dry-run or explicit execute gate, disposable output, supervised child process.
 - `worker.cjs`: exact addon path (no package loader fallback), local-only DLL search restriction, exact LoadLibraryExW(System32|DLL_LOAD_DIR), GetProcAddress for only Init/Terminate and Koffi function-pointer calls. Successful cycle releases the library/COM/search cookie; uncertainty retains dependencies until process exit.
 - `check.cjs`: source-only regression/parser/admission tests; synthetic fixtures never treated as native results.
 
@@ -27,7 +27,7 @@ node --no-addons tests/native-n1/prepare.cjs --runtime $dll --koffi $addon --ref
 node --no-addons --max-old-space-size=192 tests/native-n1/run.cjs --dry-run --manifest $manifest
 ```
 
-Preparation captures exact runtime/dependency hashes, Node hash, three executable harness-source hashes, addon identity, and reference hash. Generated manifest contains five blocking review decisions by default. A dry-run exit0 means input identities validated, **not** ready/native PASS. `ready:false` and blocker list are expected in N1. Malformed/changed identity returns2.
+Preparation captures exact runtime/dependency hashes, Node hash, four executable harness-source hashes, addon identity, and reference hash. Generated manifest contains five blocking review decisions by default. A dry-run exit0 means input identities validated, **not** ready/native PASS. `ready:false` and blocker list are expected until the exact N2 admission evidence supports a limited gate review. Malformed/changed identity returns2.
 
 Reviewers must substantiate manifest fields with evidence before clearing them: vendorReview.status CONFIRMED_MATCH or VERIFIED_LIFECYCLE_SUBSET; initSuccessRequiresTerminate/initFailureMustNotTerminate; dependencyReview REVIEWED; koffi.reviewed; safetyReview.initializationEffectsReviewed. These fields record human engineering approval, not cryptographic vendor proof. Regenerate after source/binary changes; never simply toggle booleans to bypass missing evidence.
 
@@ -39,7 +39,7 @@ node --no-addons --max-old-space-size=192 tests/native-n1/run.cjs --execute --ma
 
 Parent validates before importing child_process. One hidden native child is launched with heap128, empty preloads, disposable APPDATA/LOCALAPPDATA/TEMP, System32-only PATH and nonce/IPC handshake. Child revalidates all identities before loading. Process-local DLL search settings die with child; global machine settings unchanged. Windows loader/known DLL/API-set internals remain an external validation concern.
 
-External parent watchdog requests termination at15s; at17s unconfirmed exit is recorded processEnded=false/UNKNOWN and parent stops waiting. No retry or next DLL. A forced kill is never clean shutdown. Any init failure, exception, timeout or terminate/unload failure stops the cycle; no attempt to recover by repeated init. Terminate only after successful init; uncertain cleanup is not disguised as success.
+The parent watchdog requests termination at 15s and retains child-process supervision until Windows confirms close. It never detaches or reports an unconfirmed process as ended. If close is not confirmed, the parent waits without a final time bound and no successful receipt is produced; a stuck child can leave the runner waiting indefinitely. A forced kill is never clean shutdown. Any init failure, exception, timeout or terminate/unload failure stops the cycle; no attempt to recover by repeated init. Terminate only after successful init; uncertain cleanup is not disguised as success.
 
 Receipt records load attempt (failed DllMain load remains UNKNOWN), raw COM/init/terminate codes, balanced COM/unload observations, PID, code/signal, timeout and process-ended observation. `SOURCE_ZERO_CYCLE` is only source-level return/exit evidence; native-created descendants/OS handles/quiescence are NOT independently proven. Before declaring N2 successful, compare external process/module/handle census and confirm no unexpected Canon/device effects. Keep all logs ignored.
 

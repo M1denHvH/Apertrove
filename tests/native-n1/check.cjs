@@ -19,6 +19,16 @@ test('Default CI scripts contain no N2 entrypoint or wildcard discovery',()=>{
   const scripts=JSON.parse(fs.readFileSync(path.join(root,'package.json'))).scripts;
   assert.ok(!scripts.test.includes('*'));assert.ok(!Object.values(scripts).some(x=>x.includes('native-n1')));
 });
+test('Fresh manifests pin their generator and write outside historical N1 evidence',()=>{
+  assert.ok(files.includes('tests/native-n1/prepare.cjs'));
+  assert.ok(fs.readFileSync(path.join(__dirname,'prepare.cjs'),'utf8').includes("path.join(root,'qa','native-n2-prep'"));
+  assert.ok(fs.readFileSync(path.join(__dirname,'run.cjs'),'utf8').includes("path.join(root,'qa','native-n2-prep','n2-runs'"));
+});
+test('Watchdog keeps child supervision until process close is confirmed',()=>{
+  const source=fs.readFileSync(path.join(__dirname,'run.cjs'),'utf8');
+  assert.ok(source.includes("child.on('close',(code,signal)=>finish({code,signal,processEnded:true}))"));
+  assert.ok(!source.includes('processEnded:false')&&!source.includes('child.unref()'));
+});
 test('Valid read-only identities still deny execution without vendor/dependency/effect reviews',()=>{
   const m=manifest(),r=validate(m);assert.equal(r.ready,false);assert.equal(r.blockers.length,5);
   assert.throws(()=>validate(m,{execute:true}),/N2_NOT_QUALIFIED/);

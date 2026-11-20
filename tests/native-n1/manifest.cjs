@@ -2,7 +2,7 @@
 // Read-only admission. This module never imports Koffi or loads a DLL.
 const fs=require('node:fs'),path=require('node:path'),crypto=require('node:crypto');
 const root=path.resolve(__dirname,'../..');
-const files=['tests/native-n1/manifest.cjs','tests/native-n1/run.cjs','tests/native-n1/worker.cjs'];
+const files=['tests/native-n1/manifest.cjs','tests/native-n1/prepare.cjs','tests/native-n1/run.cjs','tests/native-n1/worker.cjs'];
 const sha=bytes=>crypto.createHash('sha256').update(bytes).digest('hex');
 function requireValue(ok,code){if(!ok)throw Error(code);}
 function ordinary(file){

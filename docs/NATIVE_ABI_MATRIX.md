@@ -70,3 +70,11 @@ Public p191 FocusPoint differs from legacy parser (28-byte public fields vs sour
 ## Transfer/data boundary
 
 Production: Download → Complete → pointer/length → copy → NEW file write → photo event → main registration acknowledgement. §3.1.26–28 supports immediate completion/cancel notification; no ACK reordering. Neither SDK success nor file close proves durable storage. DATA-005 remains OPEN; controlled H3 fault case must separately observe write/close/flush/registration/ACK. Header absence also prevents claiming vendor-backed forced-cleanup or guaranteed capture attribution.
+
+## N1.5 — refreshed runtime and lifecycle-only qualification
+
+The refreshed candidate is PSE 1.33.10.0 / x64 EDSDK.dll 3.18.40.0 / SHA-256 35c5fd7564cf8eee3bc41004a0ab21d96caccb36ea1a1ddb512caf7b1c046627. The version and size match the historical N1 PSE DLL but its hash differs. A trusted old binary was unavailable, so the change cannot be attributed to code or signing.
+
+The candidate exports EdsInitializeSDK and EdsTerminateSDK. Public Canon API Reference 13.20.11 §3.1.1–2 (p.39) gives parameterless EdsError lifecycle signatures; §2.9 and sample1 (pp.193–194) support one init/terminate pair per process and termination only after successful initialization. This supports the documented lifecycle subset for the two functions only. Canon has not mapped this public reference to the current PSE binary. Matching headers and package provenance remain unavailable. Public documentation plus PE exports is static evidence, not proof that invoking this exact PSE implementation is compatible or safe.
+
+N2 does not use structures, references, callbacks or camera operations. FocusInfo, Retain/Release, SendCommand, transfer ACK, DATA-005, H1–H3 and full-runtime ABI questions remain outside this narrow subset and are not resolved here.
