@@ -2,7 +2,43 @@
 
 Source: `electron/camera-worker.cjs`, `native-buffer.cjs`, `transfer-producer.cjs`, `native-observations.cjs`. Reference: official public Canon API Programming Reference **13.20.11**, SHA `71c3686452af13e66ffe7bc95e40f84264d7a368288d5231ccd6999fe27bdc2b`, [Canon-linked PDF](https://canon-industrial-imaging-production.fra1.digitaloceanspaces.com/wp-content/canon_b2b/uploads/2026/09/15132330/EDSDK_API_EN-4.pdf).
 
-31 mandatory bindings and one optional EdsGetVolumeInfo use `__stdcall`; return `uint32`. Except Retain/Release these represent EdsError (zero success, raw nonzero error retained, taxonomy/version still unverified). R below means reference shape compatible, **not matching runtime ABI**. U means header/packing/version evidence required. Vendor opaque refs are pointers; output ref needs pointer-to-pointer. No Koffi native sizeof or DLL calls performed.
+In the current source, 31 mandatory bindings and one optional EdsGetVolumeInfo are declared with Koffi `__stdcall` and `uint32` return. Except Retain/Release the source interprets results as EdsError (zero success, raw nonzero error retained, taxonomy/version still unverified). This describes the handwritten binding, not a verified PSE runtime convention. R below means reference shape compatible, **not matching runtime ABI**. U means header/packing/version evidence required. Vendor opaque refs are pointers; output ref needs pointer-to-pointer. No Koffi native sizeof or DLL calls performed.
+
+## Целевые типы H1 — состояние квалификации
+
+Проверенный кандидат на машине: Windows x64 `C:\Program Files\Canon\Picture Style Editor\EDSDK.dll`, file version `3.18.40.0`, размер `1,522,576` байт, SHA-256 `35c5fd7564cf8eee3bc41004a0ab21d96caccb36ea1a1ddb512caf7b1c046627`, Authenticode `Valid`, подписант `Canon Inc.`. Эти сведения идентифицируют файл, но не связывают его с версией заголовков Canon. В локальных установочных каталогах PSE/Canon, известных Downloads и проверенной N1-папке нет соответствующих `EDSDK.h`, `EDSDKTypes.h` или `EDSDKErrors.h`; это не утверждение о полном поиске по диску.
+
+Единственный локальный типовой источник — официальный публичный Canon API Programming Reference **13.20.11**, PDF SHA-256 `71c3686452af13e66ffe7bc95e40f84264d7a368288d5231ccd6999fe27bdc2b`. §1.4.1 и §6.2 (стр. 18, 189) направляют за последними определениями типов к заголовкам SDK; справочник описывает формы API и часть полей, но не даёт полного matching C ABI для указанной DLL.
+
+| Тип / ABI-свойство | Canon reference | Текущий Apertrove binding | Размер / layout / signedness | Итог |
+|---|---|---|---|---|
+| `EdsDeviceInfo` | `szPortName: EdsChar[]`, `szDeviceDescription: EdsChar[]`, `deviceSubType: EdsUInt32` (§3.1.9, стр. 43–44); длины массивов и полный layout не указаны | `char[256]`, `char[256]`, `uint32`, `uint32 reserved` в `camera-worker.cjs` | Source arithmetic: 520 байт/alignment 4; offsets `0, 256, 512, 516`. Не Canon-размер и не измерение Koffi | **UNKNOWN** |
+| `EdsPropertyDesc` | Поля и порядок заданы: `EdsInt32 form`, `EdsAccess access`, `EdsInt32 numElements`, `EdsInt32 propDesc[128]` (§6.2.2, стр. 189) | `int32 × 3` и `int32[128]`; `access` без доказательства представлен как `int32` | Source arithmetic: 524 байта/alignment 4; offsets `0, 4, 8, 12`. Ширина `EdsAccess`, padding и размер структуры не подтверждены | **UNKNOWN** |
+| `EdsAccess` | Назван типом поля; underlying declaration отсутствует в Reference | `int32` | Ширина, signedness и enum representation неизвестны | **UNKNOWN** |
+| `EdsDataType` | Используется как выходной тип `EdsGetPropertySize` (§3.1.17, стр. 50–51) | Передаётся как `uint32*` | Размер, signedness и enum representation для PSE DLL не подтверждены | **UNKNOWN** |
+| `EdsUInt32` | Reference указывает 4-байтовый return `EdsRetain` и использует типы в сигнатурах | `uint32` / `uint32*` | Документированное значение `EdsRetain` — 4 байта; подтверждения соответствующего typedef для PSE binary нет | **PARTIAL** |
+| `EdsInt32` | Используется в API и `EdsPropertyDesc` | `int32` | Отдельная matching declaration не найдена; property-ID/enum width и mapping для DLL не квалифицированы | **PARTIAL** |
+| `EdsChar` | Поля строк описаны как `EdsChar[]` (§3.1.9) | `char[256]` для `EdsDeviceInfo` | Длина, signedness, кодировка и matching field extent неизвестны | **UNKNOWN** |
+| Opaque refs / pointers | Справочник описывает объекты и `Ref*` output; `EdsGetCameraList` создаёт owned list, `EdsGetChildAtIndex` — owned child (§3.1.5, 3.1.8, стр. 41–42) | `void*`, `void**` / pointer-to-pointer output | Windows x64 pointer ожидается 8 байт, но точные typedef/call ABI установленной DLL не привязаны; освобождение требуется по Reference, живой runtime не проверялся | **PARTIAL** |
+| Calling convention functions / callbacks | Reference prototypes use vendor macros including `EDSAPI`; callback macros are not recoverable from prose | Koffi declares `__stdcall` | Current source choice only; matching `EDSAPI`/`EDSCALLBACK` definitions and exact runtime convention are unavailable | **UNKNOWN** |
+| Struct alignment / padding | Полного определения `EdsDeviceInfo` нет; для `EdsPropertyDesc` есть поля, но не packing rules | Koffi использует source declarations | `sizeof`, `alignof`, offsets и packing не подтверждены; compile-time probe невозможен без официальных matching headers | **UNKNOWN** |
+
+### Функции и callbacks, используемые H1
+
+Canon Reference документирует prototype shape и владение, не linkage к найденной PSE DLL. Поэтому следующий `PARTIAL` означает совпадение документированной формы, но не квалификацию exact binary ABI.
+
+| Функция | Документированная форма / evidence | Binding и оставшееся | Итог |
+|---|---|---|---|
+| `EdsGetDeviceInfo` | `(EdsCameraRef, EdsDeviceInfo*)`, §3.1.9, стр. 43–44 | Аргументы соответствуют форме; выходной `EdsDeviceInfo` неизвестен и вызывается при discovery | **UNKNOWN** |
+| `EdsGetPropertySize` | `(EdsBaseRef, EdsPropertyID, EdsInt32, EdsDataType*, EdsUInt32*)`, §3.1.17, стр. 50–51 | Koffi выдаёт два `uint32*`; representation `EdsDataType` / IDs не доказано | **PARTIAL** |
+| `EdsGetPropertyData` | `(EdsBaseRef, EdsPropertyID, EdsInt32, EdsUInt32, EdsVoid*)`, §3.1.18, стр. 51–52 | Выходной buffer выделяет приложение из документированного size; property-specific layout и runtime ABI не квалифицированы | **PARTIAL** |
+| `EdsGetPropertyDesc` | `(EdsBaseRef, EdsPropertyID, EdsPropertyDesc*)`, §3.1.20, стр. 55–56 | Кaller allocates Koffi structure; `EdsPropertyDesc` layout unknown, функция вызывается H1 | **UNKNOWN** |
+| `EdsGetCameraList`, `EdsGetChildCount`, `EdsGetChildAtIndex` | Ref/ref*, UInt32*, Int32 и owned list/child (§3.1.5–8, стр. 41–42) | Pointer-to-pointer shape и child index совпадают по Reference; widths/calling ABI exact binary unverified | **PARTIAL** |
+| `EdsOpenSession`, `EdsCloseSession` | `(EdsCameraRef)`; успешная сессия закрывается (§3.1.12–13, стр. 46–47) | `void*`; unknown binding result удерживает ссылку и quarantine; exact ABI/camera lifecycle unverified | **PARTIAL** |
+| `EdsRetain`, `EdsRelease` | `EdsUInt32(EdsBaseRef)`; 4-byte count, `0xFFFFFFFF` error; list/child refs имеют начальный count 1 (§3.1.3–4, стр. 40–41) | Source корректно отделяет refcount от `EdsError`; exact runtime call ABI не проверен | **PARTIAL** |
+| H1 event registrations | Object/property/state callback parameter shapes and registration functions (§3.1.47–49, стр. 75–78) | Koffi прототипы `__stdcall`; конкретные `EDSAPI`/`EDSCALLBACK` defines, ownership JS callback/context, unregister quiescence неизвестны | **PARTIAL** |
+
+Результат для H1: из перечисленного ни один тип/вызов не квалифицирован именно относительно установленного runtime. `EdsDeviceInfo`, `EdsPropertyDesc`, `EdsAccess`, `EdsDataType`, `EdsChar` и struct layout — UNKNOWN; документированные scalar/ref/function shapes — только PARTIAL. `__stdcall` и event callback declarations — текущая Koffi-конфигурация; применимые к этому binary `EDSAPI`/`EDSCALLBACK` definitions и lifetime contract отсутствуют. Probe не добавлен: в проверенных локальных корнях нет официального matching header, а исторический header не может подтвердить ABI этого runtime.
 
 ## Functions
 

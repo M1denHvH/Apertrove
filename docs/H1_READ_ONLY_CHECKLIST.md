@@ -1,6 +1,6 @@
 # EOS 2000D H1 read-only checklist
 
-**State: NOT RUN.** This checklist is for a future, separately authorized H1 after the required N2 initialize/terminate experiment succeeds. It does not authorize N2 or camera access.
+**State: NOT RUN · BLOCKED by unqualified `EdsDeviceInfo` and `EdsPropertyDesc` output layouts.** H1 is not ready for separate hardware authorization until exact-runtime ABI evidence resolves those structures and the other UNKNOWN entries in [the ABI decision](H1_ABI_DECISION.md). This checklist is for a future H1 after the required N2 initialize/terminate experiment succeeds. It does not authorize N2 or camera access.
 
 ## Current source path
 
@@ -22,7 +22,7 @@ The previous source-level handling gap for the EdsRetain/EdsRelease error sentin
 
 ## Explicitly out of scope
 
-This route reads camera identity, property values/descriptors, and storage-volume information. It does not intentionally write a property or SaveTo/Capacity, start EVF, autofocus, drive the lens, release the shutter, import/delete card files, or write to the card. It does open a logical camera session and registers event handlers; it is not a disconnected or zero-communication test. Any unexpected change, property-write attempt, capture event, transfer, or unresolved worker teardown is a stop-and-review result.
+This route reads camera identity and property values/descriptors. Volume access is **NOT QUERIED** because `EdsVolumeInfo` remains ABI-unqualified. It does not intentionally write a property or SaveTo/Capacity, start EVF, autofocus, drive the lens, release the shutter, import/delete card files, or write to the card. It does open a logical camera session and registers event handlers; it is not a disconnected or zero-communication test. Any unexpected change, property-write attempt, capture event, transfer, or unresolved worker teardown is a stop-and-review result.
 
 Record H1 outcome per behavior as DEVICE-TESTED PASS, DEVICE-TESTED FAIL, DEVICE-TESTED UNKNOWN, or NOT RUN, keeping source/documentation expectation separate. One EOS 2000D result does not establish compatibility for another model, firmware, lens, or runtime.
 
