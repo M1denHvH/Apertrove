@@ -1,6 +1,6 @@
 # N2 admission closure
 
-Статус milestone: BLOCKED_VENDOR_OR_LICENSE. Технические pre-execution gates reviewed, dry-run ready:true. Источник/регион и applicable Canon permission на сторонний init-only experiment не подтверждены. Реальное native execution — NOT RUN, отдельного разрешения нет. Предыдущие N1/N1.5 evidence сохранены; этот этап использует qa/native-n2-admission/.
+Статус milestone: BLOCKED_VENDOR_OR_LICENSE / APPLICABLE_TERMS_UNRESOLVED. Технические pre-execution gates reviewed, предыдущий dry-run ready:true. По уточнению пользователя PSE установлен из официального дистрибутива Canon, но источник/регион, принятая EULA и права на сторонний init-only experiment не подтверждены. Это не вывод о разрешении или запрете. Реальное native execution — NOT RUN, отдельного разрешения нет. Предыдущие N1/N1.5 evidence сохранены; этот этап использует qa/native-n2-admission/.
 
 ## Точная граница
 
@@ -58,11 +58,13 @@ Samples не являются packet/USB/RPC tracing. Они могут проп
 
 ## Canon terms и требуемое действие человека
 
-Публичная [Canon Asia PSE download page](https://asia.canon/en/support/0200774903) описывает региональные personal/non-commercial terms и ограничения на распространение/reverse engineering. Это не вывод о правах по иной региональной EULA и не разрешение на использование PSE DLL сторонним приложением. Установленный readmeLicensePSE.txt содержит IJG acknowledgments; он не устанавливает EDSDK development rights.
+По уточнённой модели Apertrove не включает, не скачивает и не распространяет Canon DLL. Пользователь отдельно получает официальное ПО Canon; Apertrove предполагает загрузку уже установленной совместимой DLL через Koffi. Отсутствие redistribution не доказывает use rights. Разрешение на перераспространение DLL не является условием текущей модели; право стороннего API-вызова и условия разработки/публичного выпуска собственной программы рассматриваются отдельно.
 
-Регион происхождения установленного PSE и применимое разрешение на сторонний lifecycle experiment пока не подтверждены. Пользователю нужно назвать источник/регион установки и проверить согласованную EULA либо получить у Canon подтверждение возможности вызвать EdsInitializeSDK/EdsTerminateSDK из отдельного стороннего процесса. Если такое разрешение требует developer registration, пользователь проходит её сам. Terms не принимаются агентом; DLL/headers не распространяются.
+Canon Asia — известный официальный источник, но не подтверждённый регион установки пользователя. Отдельная EDSDK Developer License/специальное разрешение не предоставлены для проверки; их наличие или отсутствие не предполагается. В доступных текстах не найдено прямого ответа, охватывает ли PSE EULA эту bundled-runtime схему. Нельзя объявлять её разрешённой, запрещённой или требующей отдельного соглашения во всех регионах.
 
-Отсутствие exact matching headers не делает двухфункциональный subset полным ABI и не добавляет автоматический technical blocker сверх уже документированного narrow experiment. Canon [Developer Portal](https://developers.canon-europe.com/developers/s/login/) остаётся путём для matching package, licenses и последующей широкой ABI/H1 квалификации.
+Конкретные положения проверенного регионального SDK-договора, различия между установкой PSE, API use, разработкой, выпуском и redistribution, официальные каналы и готовый неотправленный запрос Canon приведены в [targeted terms review](CANON_RUNTIME_USAGE_REVIEW.md). Применимость к пользователю остаётся открытой. Установленный third-party readme не заменяет Canon grant. Пользователь проверяет фактически принятую EULA либо получает относящееся к этой схеме подтверждение Canon; агент не принимает terms и не отправляет формы.
+
+Техническая подготовка сохранена, исходники и reviewed manifest/evidence не изменены этим уточнением. Регрессии повторно не выполнялись. Отсутствие exact matching headers не превращает двухфункциональный subset в полный ABI и не добавляет отдельного технического требования перераспространять/лицензировать redistribution.
 
 ## Production lifecycle и PSE-first migration
 

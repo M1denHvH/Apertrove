@@ -9,7 +9,7 @@ Native lifecycle: NOT RUN. Этот документ не является ра�
 3. Vendor review остаётся VERIFIED_LIFECYCLE_SUBSET, не Canon package mapping. Init и terminate без аргументов; terminate только при init=0.
 4. Dependency decision — STATIC_PATHS_REVIEWED, dynamicObservation=NOT_RUN. Safety decision — INITIALIZATION_PLAN_REVIEWED, runtimeObservation=NOT_RUN, WINDOWS_JOB_KILL_ON_CLOSE_TESTED containment. Runtime evidence не требуется выдумывать до первого вызова.
 5. Сначала addon-free dry-run. ready:true означает только предварительную техническую готовность; nativeLoaded:false и runtimeObservations NOT_RUN обязательны.
-6. Человек подтверждает applicable Canon rights, закрывает PSE/EOS Utility/Canon clients и физически отключает Canon USB/сетевые камеры. Никакой software flag не доказывает физическое состояние.
+6. До native load установить применимые права пользователя на загрузку PSE-shipped DLL сторонним процессом и связанные с API разработкой условия. Отсутствие redistribution само по себе этого не доказывает; отдельное разрешение на перераспространение DLL для модели без DLL не требуется как предварительное условие. Region/EULA и предоставленное Canon разрешение пока не подтверждены; см. CANON_RUNTIME_USAGE_REVIEW.md. Затем человек закрывает PSE/EOS Utility/Canon clients и физически отключает Canon USB/сетевые камеры. Никакой software flag не доказывает физическое состояние.
 7. Получить отдельное явное разрешение на один init-only cycle. Если license или containment blocker не решён, остановиться до native load.
 
 ## Sources
