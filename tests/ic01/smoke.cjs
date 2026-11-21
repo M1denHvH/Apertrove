@@ -205,7 +205,7 @@ async function main(){
       const provider=await driver(lifecycle,'workerControl','snapshot');assert.equal(provider.nativeCalls,0);assert.ok(provider.references.every(value=>value===0));assert.equal(provider.denials.filter(item=>!item.expected).length,0);await close(lifecycle);
     });
     const h1Readonly=fixture('h1-readonly');
-    await check('H1 read-only diagnosis uses one non-working connection and no mutating camera command',async()=>{
+    await check('H1 read-only diagnosis stays non-working before explicit controls-only IPC exposure checks',async()=>{
       await launch(h1Readonly);await call(h1Readonly,'boot');
       const cameras=await call(h1Readonly,'listCameras');assert.equal(cameras.length,1);
       const report=await call(h1Readonly,'cameraDiagnose',{cameraId:cameras[0].id});
@@ -213,14 +213,34 @@ async function main(){
       const state=await driver(h1Readonly,'snapshot'),worker=await driver(h1Readonly,'workerControl','snapshot');assert.equal(state.camera.working,false);assert.equal(state.camera.saveTo,null);assert.equal(state.settings.onboarding.report.model,'IC01 Synthetic Camera');assert.equal(worker.h1.readOnlyConnects,1);assert.equal(worker.h1.workingConnects,0);assert.equal(worker.h1.diagnoses,1);
       assert.equal(worker.nativeCalls,0);assert.equal(worker.references.length,0);assert.equal(worker.files.length,0);assert.equal(state.photos.length,0);
       assert.equal(worker.h1.propertyCalls,0);assert.equal(worker.h1.propertyWrites,0);assert.equal(worker.h1.captureCalls,0);assert.equal(worker.h1.liveCalls,0);assert.equal(worker.h1.autofocusCalls,0);assert.equal(worker.h1.focusCalls,0);assert.equal(worker.h1.listCardCalls,0);assert.equal(worker.h1.importCardCalls,0);assert.equal(worker.h1.readOnlyMutationAttempts,0);
-      await call(h1Readonly,'cameraEndDiagnostics');const closed=await driver(h1Readonly,'snapshot');assert.equal(closed.camera.connected,false);await close(h1Readonly);
+      await call(h1Readonly,'cameraEndDiagnostics');const closed=await driver(h1Readonly,'snapshot');assert.equal(closed.camera.connected,false);
+      const controlled=await call(h1Readonly,'cameraWorking',{cameraId:cameras[0].id,controlsOnly:true});
+      assert.equal(controlled.connected,true);assert.equal(controlled.working,true);assert.equal(controlled.controlsOnly,true);assert.equal(controlled.eventsRegistered,false);assert.equal(controlled.saveTo,null);assert.equal(controlled.capabilities.capture,false);assert.equal(controlled.capabilities.import,false);
+      assert.equal(controlled.properties.whiteBalance.writable,false);
+      const restored={},writes=[];
+      for(const key of ['iso','shutter','aperture']){
+        const original=controlled.properties[key].value,target=controlled.properties[key].allowed.find(value=>value!==original);assert.ok(Number.isInteger(target));
+        const changed=await call(h1Readonly,'property',{key,value:target});assert.equal(changed.properties[key].value,target);writes.push({key,before:original,value:target});
+        const returned=await call(h1Readonly,'property',{key,value:original});assert.equal(returned.properties[key].value,original);writes.push({key,before:target,value:original});restored[key]=original;
+      }
+      for(const [method,args] of [['capture'],['listCard'],['importCard',{ids:['item-1']}],['property',{key:'whiteBalance',value:1}]])await rejected(call(h1Readonly,method,args),'control-only rejects '+method);
+      const transferFolder=path.join(h1Readonly.folder,'blocked-destination');fs.mkdirSync(transferFolder);
+      await driver(h1Readonly,'dialog','open',{canceled:false,filePaths:[transferFolder]});await rejected(call(h1Readonly,'chooseFolder',{kind:'captureFolder'}),'control-only destination change');
+      const after=await driver(h1Readonly,'snapshot'),provider=await driver(h1Readonly,'workerControl','snapshot');
+      for(const key of Object.keys(restored))assert.equal(after.camera.properties[key].value,restored[key]);
+      for(const key of ['savePreference','preferredCameraId','captureFolder'])assert.equal(after.settings[key],closed.settings[key],'No implicit setting change: '+key);
+      assert.equal(provider.h2.controlsOnlyConnects,1);assert.equal(provider.h1.workingConnects,0);assert.equal(provider.h1.readOnlyConnects,1);assert.equal(provider.h1.propertyWrites,6);assert.deepEqual(provider.h2.exposureWrites,writes);assert.equal(provider.h2.blockedFileOperations,4);
+      assert.equal(provider.eventsRegistered,false);assert.equal(provider.saveTo,null);assert.equal(provider.files.length,0);assert.equal(provider.references.length,0);assert.equal(provider.nativeCalls,0);assert.equal(after.photos.length,0);
+      h1Readonly.probes={controlsOnly:{restored,writes,blockedFileOperations:provider.h2.blockedFileOperations,savePreferenceUnchanged:true,nativeCalls:provider.nativeCalls}};
+      await call(h1Readonly,'disconnect');assert.equal((await driver(h1Readonly,'snapshot')).camera.controlsOnly,false);await close(h1Readonly);
     });
     const liveHistogram=fixture('live-histogram');
-    await check('H1 Live View histogram toggle updates from synthetic frames, persists, and stops cleanly',async()=>{
+    await check('H1 Live View histogram toggles with controls-only IPC and synthetic frames, then stops cleanly',async()=>{
       await launch(liveHistogram);await call(liveHistogram,'boot');
       await driver(liveHistogram,'workerControl','configure',{liveView:true});
       const cameras=await call(liveHistogram,'listCameras');assert.equal(cameras.length,1);
-      const connected=await call(liveHistogram,'connect',{cameraId:cameras[0].id});assert.equal(connected.connected,true);assert.equal(connected.capabilities.liveView,true);
+      const before=await driver(liveHistogram,'snapshot');
+      const connected=await call(liveHistogram,'cameraWorking',{cameraId:cameras[0].id,controlsOnly:true});assert.equal(connected.connected,true);assert.equal(connected.controlsOnly,true);assert.equal(connected.capabilities.liveView,true);assert.equal(connected.capabilities.capture,false);assert.equal(connected.capabilities.import,false);assert.equal(connected.eventsRegistered,false);assert.equal(connected.saveTo,null);
       const labels=catalogs['en-US'],capture=liveHistogram.page.locator('.sidebar').getByRole('button',{name:labels['desktop.capture'],exact:true});await capture.click();
       await liveHistogram.page.getByRole('button',{name:'Live View',exact:true}).click();
       const histogramToggle=liveHistogram.page.locator('.live-histogram-widget button[aria-pressed="false"]');await histogramToggle.waitFor();await histogramToggle.click();
@@ -229,9 +249,13 @@ async function main(){
       const frameCount=await liveHistogram.page.locator('.live-canvas').getAttribute('data-frames');assert.ok(Number(frameCount)>0);
       const histogramPaths=await liveHistogram.page.locator('.live-histogram-widget svg path').count();assert.equal(histogramPaths,4);
       assert.equal(await liveHistogram.page.locator('.live-histogram-note').textContent(),labels['desktop.live_histogram_software']);
+      await liveHistogram.page.locator('.live-histogram-widget button[aria-pressed="true"]').click();
+      await liveHistogram.page.locator('.live-histogram-widget svg').waitFor({state:'detached'});await eventually(()=>driver(liveHistogram,'snapshot'),state=>state.settings.liveHistogramEnabled===false,'histogram disabled');assert.equal(read(liveHistogram.filename).settings.liveHistogramEnabled,false);
+      await liveHistogram.page.locator('.live-histogram-widget button[aria-pressed="false"]').click();await liveHistogram.page.locator('.live-histogram-widget svg path').first().waitFor();
       await liveHistogram.page.getByRole('button',{name:labels['desktop.stop_live_view'],exact:true}).click();
       await liveHistogram.page.locator('.live-histogram-widget svg').waitFor({state:'detached'});assert.equal((await driver(liveHistogram,'snapshot')).camera.live,false);
-      const worker=await driver(liveHistogram,'workerControl','snapshot');assert.equal(worker.h1.liveCalls,2);assert.equal(worker.h1.propertyWrites,0);assert.equal(worker.h1.captureCalls,0);assert.equal(worker.nativeCalls,0);
+      const after=await driver(liveHistogram,'snapshot'),worker=await driver(liveHistogram,'workerControl','snapshot');assert.equal(worker.h1.liveCalls,2);assert.equal(worker.h1.propertyWrites,0);assert.equal(worker.h1.captureCalls,0);assert.equal(worker.nativeCalls,0);assert.equal(worker.h2.controlsOnlyConnects,1);assert.equal(worker.h1.workingConnects,0);assert.equal(worker.eventsRegistered,false);assert.equal(worker.saveTo,null);assert.equal(worker.files.length,0);assert.equal(worker.references.length,0);assert.equal(after.settings.savePreference,before.settings.savePreference);
+      liveHistogram.probes={controlsOnly:{syntheticFrames:Number(frameCount),histogramPaths,histogramOnOff:true,liveCalls:worker.h1.liveCalls,nativeCalls:worker.nativeCalls}};
       await close(liveHistogram);
     });
     const runtimeRotation=fixture('runtime-rotation');
