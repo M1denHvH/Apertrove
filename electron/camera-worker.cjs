@@ -6,6 +6,7 @@ const {PROPS,choices,WHITE_BALANCE_COLOR_TEMPERATURE} = require('./camera-values
 const {parseFocusInfo}=require('./focus-info.cjs');
 const {quietPeriod}=require('./capture-timing.cjs');
 const {holdShutter}=require('./shutter-latch.cjs');
+const {createShutterDiagnostics}=require('./shutter-diagnostics.cjs');
 const {createCameraControl} = require('./camera-control.cjs');
 const {copyNativeBuffer} = require('./native-buffer.cjs');
 const {describeCamera,modelCapabilities,selectCamera} = require('./camera-discovery.cjs');
@@ -32,6 +33,7 @@ const initializationGate=createSdkInitializationGate();
 const quarantinedNativeRefs=new Set();
 const observations=createNativeObservations(),transfers=createTransferContexts({recoveryDestination:process.env.APERTROVE_RECOVERY_DESTINATION,newId:randomUUID});
 transfers.setRoute({sessionEpoch,sessionId:null,destination:''});
+const shutterTrace=createShutterDiagnostics({enabled:process.env.APERTROVE_SHUTTER_TRACE==='1',write:data=>send({event:'shutterDiagnostic',data})});
 function observed(method,phase,fn,kind='error-code'){
   try{const code=fn(),entry=observations.observe({operation:phase==='event-pump'?'event-pump':currentOperation?.method||'native',operationId:currentOperation?.operationId,phase,method,code,kind});if(entry.failure&&entry.count===1)send({event:'nativeObservation',data:entry});return code;}
   catch(error){observations.failure({operation:currentOperation?.method||'native',operationId:currentOperation?.operationId,phase,method,error});send({event:'nativeObservation',data:{method,phase,classification:'UNKNOWN'}});throw error;}
@@ -533,21 +535,22 @@ function download(ref,folder,isCapture=false,context) {
     while(true) {target=path.join(folder,`${stem}${i?'_'+i:''}${ext}`);try {fs.writeFileSync(target,bytes,{flag:'wx'});break;}catch(e){if(e.code!=='EEXIST')throw e;i++;}}
     if(isCapture)evidence.capture=true;
     send({event:'photo',photoSequence:++photoSequence,data:{path:target,capture:isCapture,context:{...context,phase:'ORIGINAL_COMMITTED'}}});log('success',`Сохранено: ${path.basename(target)}`);
-    if(isCapture&&captureWait){captureWait.observedTransfers++;send({event:'burstProgress',data:{shots:0,observedTransfers:captureWait.observedTransfers,confirmation:'UNVERIFIED'}});settleCapture();}
+    if(isCapture&&captureWait){shutterTrace('capture-event',{...captureWait.input,operationId:captureWait.operationId,servo:state.servo?.status});captureWait.observedTransfers++;send({event:'burstProgress',data:{shots:0,observedTransfers:captureWait.observedTransfers,confirmation:'UNVERIFIED'}});settleCapture();}
     return {path:target};
   } finally {if(!complete) sdk.cancel(ref);if(stream)releaseRef(stream,'download-stream-release');}
 }
-function capture({autofocus=true,folder,burstMs=0,route,captureId},operation){
+function capture({autofocus=true,folder,burstMs=0,route,captureId,input},operation){
   ensureWorking();if(state.capabilities?.capture===false)throw Error(state.capabilities.reason||'Съёмка недоступна.');if(captureWait||controls.isBusy())throw Error('Предыдущая команда камеры ещё выполняется.');destination=folder||destination;
   if(get(0x400)===4||get(PROPS.shutter)===0x0c)throw operationError('BULB_PROTOCOL_UNQUALIFIED','BULB недоступен: протокол этой камеры и версии SDK не квалифицирован.');
   if(burstMs&&(![1,4,5].includes(get(0x401))||burstMs<100||burstMs>5000))throw Error('Выберите доступный серийный режим камеры. Максимальное удержание — 5 секунд.');
   setDeliveryRoute({route,folder});transfers.noteCapture({operationId:operation.operationId,captureId,sessionEpoch});
   return new Promise((resolve,reject)=>{
     const driveMode=get(0x401);captureWait={resolve,reject,operationId:operation.operationId,observedTransfers:0,quietMs:quietPeriod(driveMode,get(0x406)),timeout:setTimeout(()=>failCapture(operationError('OPERATION_UNKNOWN_TERMINATION','Native capture completion is unverified after the producer deadline.')),driveMode===7?900000:75000)};
-    let failure;const waiting=captureWait;
-    const release=()=>{try{controls.releaseAfterCapture(param=>{if(!camera||observed('EdsSendCommand','release',()=>sdk.command(camera,4,param))!==0)throw operationError('OPERATION_UNKNOWN_TERMINATION','Shutter release could not be acknowledged.');});}catch{waiting.releaseUnknown=true;throw operationError('OPERATION_UNKNOWN_TERMINATION','Shutter release could not be acknowledged.');}};
+    let failure;const waiting=captureWait;waiting.input=input;
+    const dispatch=(parameter,phase)=>{shutterTrace('sdk-dispatch',{...input,operationId:operation.operationId,command:4,parameter,servo:state.servo?.status,driveMode,worker:'capture'});try{const code=observed('EdsSendCommand',phase,()=>sdk.command(camera,4,parameter));shutterTrace('sdk-result',{...input,operationId:operation.operationId,command:4,parameter,code});return code;}catch(error){shutterTrace('sdk-error',{...input,operationId:operation.operationId,command:4,parameter,code:Number.isInteger(error?.code)?error.code:-1});throw error;}};
+    const release=()=>{try{controls.releaseAfterCapture(param=>{if(!camera||dispatch(param,'release')!==0)throw operationError('OPERATION_UNKNOWN_TERMINATION','Shutter release could not be acknowledged.');});}catch{waiting.releaseUnknown=true;throw operationError('OPERATION_UNKNOWN_TERMINATION','Shutter release could not be acknowledged.');}};
     try{
-      if(burstMs){waiting.latch=holdShutter({press:()=>check(observed('EdsSendCommand','capture',()=>sdk.command(camera,4,autofocus?3:0x10003)),'Серийный спуск'),release,onReleased:()=>{send({event:'burstReleased'});if(captureWait===waiting)settleCapture();},onError:failCapture},burstMs);}
+      if(burstMs){waiting.latch=holdShutter({press:()=>check(dispatch(autofocus?3:0x10003,'capture'),'Серийный спуск'),release,onReleased:()=>{send({event:'burstReleased'});if(captureWait===waiting)settleCapture();},onError:failCapture,onWatchdog:()=>shutterTrace('watchdog',{...input,operationId:operation.operationId,watchdogMs:burstMs})},burstMs);}
       else{const code=observed('EdsSendCommand','capture',()=>sdk.command(camera,4,autofocus?3:0x10003));check(isUnsupportedCommand(code)?observed('EdsSendCommand','capture',()=>sdk.command(camera,0,0)):code,'Спуск затвора');}
     }catch(error){observations.failure({operation:'capture',operationId:operation.operationId,method:'EdsSendCommand',phase:'capture',error});failure=error;}
     finally{if(!burstMs)try{release();}catch(error){failure||=error;}}
@@ -579,7 +582,9 @@ const controls=createCameraControl({
       if(!owedStop){const output=get(0x500),mode=get(0x501);if(output===null||!(output&2)||mode===null||mode===0)throw Error('Камера не подтвердила Live View для фокуса.');}
       if(id===0x102)controlAfStopPending=param===1;
     }
-    check(state.controlsOnly?observed('EdsSendCommand','controls-only-focus',()=>sdk.command(camera,id,param)):sdk.command(camera,id,param),action);
+    shutterTrace('af-dispatch',{operationId:currentOperation?.operationId,command:id,parameter:param,servo:state.servo?.status,worker:'focus'});
+    const result=state.controlsOnly?observed('EdsSendCommand','controls-only-focus',()=>sdk.command(camera,id,param)):sdk.command(camera,id,param);
+    shutterTrace('af-result',{operationId:currentOperation?.operationId,command:id,parameter:param,code:result,servo:state.servo?.status});check(result,action);
   }
 });
 const handlers={
@@ -591,7 +596,9 @@ const handlers={
   producerFence:async()=>{operations.stopAdmission();await operations.whenIdle({exclusiveOnly:true});controls.stopServo();await bulb.shutdown();await transferProducer.drain();clearTimeout(timer);transferProducer.fence();producersFenced=true;return {drained:true,lastPhotoSequence:photoSequence,nativeStarted,proof:nativeStarted?'unknown':'native-not-started',transfers:transferProducer.snapshot()};},
   finalizeShutdown:async()=>{if(!producersFenced)throw operationError('OPERATION_ADMISSION_CLOSED','A producer fence is required before teardown.');shuttingDown=true;await transferProducer.drain();disconnect();await new Promise(resolve=>setImmediate(resolve));const released=releaseSdk();if(released&&com)observed('CoUninitialize','com-uninitialize',()=>com(),'void');send({event:'shutdown'});setTimeout(()=>process.exit(teardownUncertain?1:0),20);return {closed:true,lastPhotoSequence:photoSequence,nativeStarted,proof:nativeStarted?'unknown':'native-not-started',observations:observations.snapshot(),transfers:transferProducer.snapshot()};}
 };
-const operationHandlers=Object.fromEntries(Object.entries(handlers).map(([method,handler])=>[method,async(args,context)=>{const owned=!['status','burstStop','servoStop','bulbStop','producerFence'].includes(method);if(owned)currentOperation={method,operationId:context.operationId};try{if(teardownUncertain&&!['status','burstStop','servoStop','bulbStop','producerFence','finalizeShutdown'].includes(method))throw operationError('OPERATION_UNKNOWN_TERMINATION','Native teardown state is unverified.');if(controls.isServoHeld()&&!['status','capture','servoStop','bulbStop','servo','property','live','disconnect','producerFence','finalizeShutdown'].includes(method))throw operationError('OPERATION_BUSY','Остановите AI Servo перед другой командой камеры.');if(state.servo.enabled===null&&state.connected&&!['status','servoStop','disconnect','producerFence','finalizeShutdown'].includes(method))throw operationError('OPERATION_UNKNOWN_TERMINATION','Остановка AI Servo не подтверждена. Отключите камеру.');return await handler(args,context);}finally{if(currentOperation?.operationId===context.operationId)currentOperation=null;}}]));
+// Safety shutter release must bypass held/unknown Servo guards. Blocking burstStop
+// leaves the full press active until holdShutter's 5-second watchdog fires.
+const operationHandlers=Object.fromEntries(Object.entries(handlers).map(([method,handler])=>[method,async(args,context)=>{const owned=!['status','burstStop','servoStop','bulbStop','producerFence'].includes(method);if(owned)currentOperation={method,operationId:context.operationId};try{if(teardownUncertain&&!['status','burstStop','servoStop','bulbStop','producerFence','finalizeShutdown'].includes(method))throw operationError('OPERATION_UNKNOWN_TERMINATION','Native teardown state is unverified.');if(controls.isServoHeld()&&!['status','capture','burstStop','servoStop','bulbStop','servo','property','live','disconnect','producerFence','finalizeShutdown'].includes(method))throw operationError('OPERATION_BUSY','Остановите AI Servo перед другой командой камеры.');if(state.servo.enabled===null&&state.connected&&!['status','burstStop','servoStop','disconnect','producerFence','finalizeShutdown'].includes(method))throw operationError('OPERATION_UNKNOWN_TERMINATION','Остановка AI Servo не подтверждена. Отключите камеру.');return await handler(args,context);}finally{if(currentOperation?.operationId===context.operationId)currentOperation=null;}}]));
 const operations=createOperationHost({generation,handlers:operationHandlers,send,getSessionEpoch:()=>sessionEpoch});
 async function receive(message) {if(shuttingDown)return;if(message?.type==='emergencyRelease'&&message.generation===generation){try{stopBurst();controls.stopServo();await bulb.stop();}catch{send({event:'transferIssue',data:{code:'EMERGENCY_RELEASE_UNKNOWN'}});}return;}await operations.receive(message);}
 if(parent)parent.on('message',({data})=>receive(data));else process.on('message',receive);

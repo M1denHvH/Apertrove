@@ -7,7 +7,7 @@ assert.ok(source&&!/require\s*\(/.test(source));
 function fixture(){
   const calls=[],pending=[];let shots=0;
   const channel={nativeEpoch:7,exited:false,rpc:{hasOutstanding:()=>pending.some(item=>item.method==='servo'),snapshot:()=>({admissionOpen:true})}};
-  const port={camera:{connected:true,servo:{enabled:false,status:'off'},properties:{driveMode:{value:1}}},
+  const port={shutterInput:value=>value||{},shutterTrace:()=>{},camera:{connected:true,servo:{enabled:false,status:'off'},properties:{driveMode:{value:1}}},
     worker:{},workerState:channel,quitting:false,runtimeQuarantined:false,interval:null,captureActive:false,sessionTransition:false,accessoryBusy:false,controlBusy:false,servoTransition:null,captureQueued:false,pendingBurstStart:null,burst:null,
     store:{sessionId:'session',sessions:[{id:'session'}]},burstActive:()=>false,seriesActive:()=>false,t:key=>key,remote:{publishState(){}},crypto:{randomUUID:()=> 'synthetic-burst'},emit(){},log(){},importQueue:Promise.resolve(),trackApplication:job=>job,
     call(method,args){

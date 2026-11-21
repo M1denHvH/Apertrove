@@ -66,7 +66,7 @@ function App(){
   const [data,setData]=useState(null),[page,setPage]=useState('sessions'),[selected,setSelected]=useState(null),[busy,setBusy]=useState(''),[toasts,setToasts]=useState([]),[modal,setModal]=useState(null),[search,setSearch]=useState(''),[filter,setFilter]=useState('all'),[zoom,setZoom]=useState(1),[grid,setGrid]=useState(false),[edited,setEdited]=useState(null),[rendered,setRendered]=useState(null),[compare,setCompare]=useState(false),[presetDraft,setPresetDraft]=useState(null),[cardFiles,setCardFiles]=useState(null),[cardSelected,setCardSelected]=useState([]),[intervalCount,setIntervalCount]=useState(12),[intervalSeconds,setIntervalSeconds]=useState(5),[sessionDraft,setSessionDraft]=useState(null),[librarySeries,setLibrarySeries]=useState(''),[metadataOpen,setMetadataOpen]=useState(false),[libraryScope,setLibraryScope]=useState('all');
   const arrival=useRef(null), previousNav=useRef(null),nativeBusyRef=useRef(false),captureBlockedRef=useRef(true),pageRef=useRef(page);pageRef.current=page;nativeBusyRef.current=!!data?.operationState?.busy||servoHeld(data?.camera||{})||bulbHeld(data?.camera||{});
   const bootController=useRef(null),bootHeading=useRef(null),[boot,setBoot]=useState({phase:'loading'});
-  const selectedRef=useRef(selected),previewGeneration=useRef(0),toastId=useRef(0),burstOwner=useRef(false);selectedRef.current=selected;
+  const selectedRef=useRef(selected),previewGeneration=useRef(0),toastId=useRef(0),burstOwner=useRef(null);selectedRef.current=selected;
   const [focusStep,setFocusStep]=useState(1),[focusPreviewVisible,setFocusPreviewVisible]=useState(false),[sessionDeleteProgress,setSessionDeleteProgress]=useState(null);
   const [photoSelectionMode,setPhotoSelectionMode]=useState(false),[markedPhotos,setMarkedPhotos]=useState([]),[photoDeleteDraft,setPhotoDeleteDraft]=useState(null),[photoDeleteProgress,setPhotoDeleteProgress]=useState(null);
   const toast=useCallback((message,type='success')=>{const id=++toastId.current;setToasts(t=>[...t.slice(-3),{id,message,type}]);setTimeout(()=>setToasts(t=>t.filter(v=>v.id!==id)),6500);},[]);
@@ -133,12 +133,14 @@ function App(){
     const timer=setTimeout(()=>{api.renderPreview({id:photo.id,edits:edited}).then(url=>{if(gen===previewGeneration.current)setRendered(url);}).catch(e=>{if(gen===previewGeneration.current)toast(errMessage(e),'error');});},240);
     return()=>{clearTimeout(timer);previewGeneration.current++;};
   },[selected,edited,modal]);
-  const startBurst=()=>{if(captureBlockedRef.current){toast(()=>t('operation.busy'),'error');return;}burstOwner.current=true;return run('burstStart',async()=>{try{return await api.burstStart({seconds:5});}catch(error){burstOwner.current=false;throw error;}},{allowDuringNative:true});};
-  const stopBurst=()=>{if(!burstOwner.current)return;burstOwner.current=false;return api.burstStop().catch(e=>toast(errMessage(e),'error'));};
-  const takePicture=()=>!captureBlockedRef.current&&run('capture',async()=>{const result=await api.capture();if(result?.confirmation==='UNVERIFIED')toast(()=>t('operation.capture_unverified'),'info');return result;},{allowDuringNative:true});
+  const startBurst=input=>{if(captureBlockedRef.current){toast(()=>t('operation.busy'),'error');return;}const intent=input||{inputId:crypto.randomUUID(),source:'keyboard-body'};if(burstOwner.current)return;burstOwner.current=intent;return run('burstStart',async()=>{try{return await api.burstStart({seconds:5,input:intent});}catch(error){if(burstOwner.current===intent)burstOwner.current=null;throw error;}},{allowDuringNative:true});};
+  const stopBurst=release=>{const input=burstOwner.current;if(!input)return;burstOwner.current=null;return api.burstStop({input:{...input,reason:release?.reason||release?.type||'release'}}).catch(e=>toast(errMessage(e),'error'));};
+  const takePicture=event=>!captureBlockedRef.current&&run('capture',async()=>{const result=await api.capture({input:{inputId:crypto.randomUUID(),source:event?.source||'pointer'}});if(result?.confirmation==='UNVERIFIED')toast(()=>t('operation.capture_unverified'),'info');return result;},{allowDuringNative:true});
   const toggleServo=enabled=>run('servo',()=>api.servo({enabled}),{allowDuringNative:!enabled});
   const startBulb=()=>run('bulbStart',()=>api.bulbStart());
   const stopBulb=()=>run('bulbStop',()=>api.bulbStop(),{allowDuringNative:true});
+  useEffect(()=>{if(!cam.connected||page!=='capture'||modal)stopBurst({reason:!cam.connected?'disconnect':'unmount'});},[cam.connected,page,modal]);
+  useEffect(()=>{const release=event=>stopBurst(event);window.addEventListener('pagehide',release);return()=>{window.removeEventListener('pagehide',release);stopBurst({reason:'unmount'});};},[]);
   const updateRating=(id,rating)=>run('rating',()=>api.photoUpdate({id,rating}));
   const saveEdits=()=>run('saveEdits',async()=>{await api.photoUpdate({id:photo.id,edits:edited});toast(() => (t("desktop.edits_saved")));});
   const assignPhotoSession=sessionId=>run('photoSession',async()=>{await api.photoUpdate({id:photo.id,sessionId:sessionId||null});toast(()=>t('desktop.session_assignment_saved'));});
@@ -150,7 +152,7 @@ function App(){
       if(e.key==='Delete'&&!metadataOpen&&!photoDeletionBlocked&&(modal==='viewer'&&photo||!modal&&page==='library'&&markedPhotos.length)){e.preventDefault();requestDeletePhotos(modal==='viewer'?[photo.id]:markedPhotos);return;}
       if(modal&&modal!=='viewer')return;
       if(!modal&&page==='library'&&(e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='a'){e.preventDefault();setPhotoSelectionMode(true);setMarkedPhotos(viewerPhotos.map(photo=>photo.id));return;}
-      if(e.code==='Space'&&!e.target.closest?.('button')&&page==='capture'&&!modal&&cam.connected&&!bulbMode&&cam.capabilities?.capture!==false&&!captureBlocked){e.preventDefault();if(!e.repeat){if(nativeContinuous)startBurst();else takePicture();}}
+      if(e.code==='Space'&&!e.target.closest?.('button')&&page==='capture'&&!modal&&cam.connected&&!bulbMode&&cam.capabilities?.capture!==false&&!captureBlocked){e.preventDefault();if(!e.repeat){if(nativeContinuous)startBurst();else takePicture({source:'keyboard-body'});}}
       if((e.key==='ArrowRight'||e.key==='ArrowLeft')&&viewerPhotos.length){e.preventDefault();movePhoto(e.key==='ArrowRight'?1:-1);}
       if(/^[0-5]$/.test(e.key)&&photo)updateRating(photo.id,Number(e.key));
       if(e.ctrlKey&&e.key.toLowerCase()==='i'){e.preventDefault();run('import',()=>api.importFiles());}

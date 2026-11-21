@@ -28,7 +28,7 @@ function createFakeCamera(options={}){
   const entrypoint=checkedExisting(path.join(__dirname,'fake-camera.cjs'),ROOT);
   const token=crypto.randomBytes(32).toString('hex'),scope=crypto.randomUUID();let sequence=0;
   const seedSha256=crypto.createHash('sha256').update(bytes).digest('hex');
-  const sourceFiles=['tests/ic01/admission.cjs','tests/ic01/fake-camera.cjs','electron/operation-lifecycle.cjs','electron/transfer-context.cjs','electron/transfer-producer.cjs','electron/servo-focus.cjs','electron/bulb-control.cjs','electron/camera-values.cjs','electron/image-quality.cjs'];
+  const sourceFiles=['tests/ic01/admission.cjs','tests/ic01/fake-camera.cjs','electron/operation-lifecycle.cjs','electron/transfer-context.cjs','electron/transfer-producer.cjs','electron/servo-focus.cjs','electron/shutter-latch.cjs','electron/bulb-control.cjs','electron/camera-values.cjs','electron/image-quality.cjs'];
   const sourceHashes=Object.fromEntries(sourceFiles.map(file=>[file,crypto.createHash('sha256').update(fs.readFileSync(checkedExisting(path.join(ROOT,file),ROOT))).digest('hex')]));
   return Object.freeze({
     entrypoint,

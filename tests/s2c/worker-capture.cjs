@@ -18,7 +18,7 @@ async function main(){
     let now=0,next=0;const timers=new Map(),commands=[],events=[],settlements=[];
     const clock={setTimeout(fn,ms){const id=++next;timers.set(id,{at:now+ms,fn});return id;},clearTimeout(id){timers.delete(id);}};
     const operationError=(code,message)=>Object.assign(Error(message),{code});
-    const sandbox={...clock,console:undefined,module:{exports:{}},camera:{fake:true},captureWait:null,sessionEpoch:1,destination:'synthetic',PROPS:{shutter:0x406},controls:{isBusy:()=>false,releaseAfterCapture:fn=>fn(servo?1:0)},state:{capabilities:{capture:true}},
+    const sandbox={...clock,shutterTrace:()=>{},console:undefined,module:{exports:{}},camera:{fake:true},captureWait:null,sessionEpoch:1,destination:'synthetic',PROPS:{shutter:0x406},controls:{isBusy:()=>false,releaseAfterCapture:fn=>fn(servo?1:0)},state:{capabilities:{capture:true}},
       ensureWorking(){},setDeliveryRoute(){},get:id=>id===0x401?(burst?1:0):0,quietPeriod:()=>650,
       isUnsupportedCommand:code=>code===7,operationError,
       check(code){if(code)throw Object.assign(Error('Synthetic primary failure'),{code});},

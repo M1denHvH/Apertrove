@@ -154,7 +154,7 @@ test('AF always attempts one owed OFF after a possibly dispatched ON exception o
 test('worker permits only the owed AF stop after Live View stops, never a shutter or lens command',()=>{
   const commands=[],source=section(worker,'  command:(id,param,action)=>','\n});');
   const context=load('const command=({'+source+'}).command;',{
-    state:{controlsOnly:true},live:true,controlAfStopPending:false,ensure:()=>{},camera:{},get:id=>id===0x500?2:1,observed:(_name,_phase,fn)=>fn(),
+    shutterTrace:()=>{},currentOperation:null,state:{controlsOnly:true},live:true,controlAfStopPending:false,ensure:()=>{},camera:{},get:id=>id===0x500?2:1,observed:(_name,_phase,fn)=>fn(),
     check:code=>assert.equal(code,0),sdk:{command:(_camera,id,param)=>{commands.push([id,param]);return 0;}}
   },['command']);
   context.command(0x102,1);context.live=false;

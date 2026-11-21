@@ -36,6 +36,7 @@ const {createOperationClient}=require('./operation-lifecycle.cjs');
 const {createTransferConsumer}=require('./transfer-consumer.cjs');
 const {createShutdownCoordinator}=require('./shutdown-coordinator.cjs');
 const {createWorkerRetirement}=require('./runtime-replacement.cjs');
+const {shutterInput,createShutterDiagnostics}=require('./shutter-diagnostics.cjs');
 const metadataCache=new Map();
 const previewTasks=new Set();
 app.setName('Apertrove');
@@ -94,8 +95,9 @@ async function withShutterControl(command){
     return await command();
   }finally{captureQueued=false;}
 }
-function captureFromControl(){return withShutterControl(()=>capture());}
-function burstFromControl({seconds=5}={}){
+function captureFromControl(args={}){const input=shutterInput(args.input);shutterTrace('capture-request',{...input,servo:camera.servo?.status,driveMode:camera.properties.driveMode?.value});return withShutterControl(()=>capture({input}));}
+function burstFromControl({seconds=5,input:rawInput}={}){
+  const input=shutterInput(rawInput);shutterTrace('input-press',{...input,servo:camera.servo?.status,driveMode:camera.properties.driveMode?.value,watchdogMs:5000});
   if(pendingBurstStart)throw Error('Камера занята.');
   const intent={released:false};pendingBurstStart=intent;
   return withShutterControl(()=>{
@@ -106,7 +108,7 @@ function burstFromControl({seconds=5}={}){
     if(![1,4,5].includes(camera.properties.driveMode?.value))throw Error('Выберите серийный режим камеры.');
     seconds=Number(seconds);if(!Number.isFinite(seconds)||seconds<.1||seconds>5)throw Error('Удержание: от 0.1 до 5 секунд.');
     burst={id:crypto.randomUUID(),status:'holding',shots:0,seconds,startedAt:Date.now()};emit('burst',{...burst});
-    trackApplication(capture({burstMs:Math.round(seconds*1000)},{burstId:burst.id}).then(async result=>{
+    trackApplication(capture({burstMs:Math.round(seconds*1000),input},{burstId:burst.id}).then(async result=>{
       await importQueue;burst={...burst,status:result.confirmation==='CONFIRMED'?'completed':'unconfirmed',shots:result.confirmation==='CONFIRMED'?result.shots:0,observedTransfers:result.observedTransfers||0};emit('burst',burst);
     }).catch(error=>{burst={...burst,status:'failed',error:error.message};emit('burst',burst);log('error',error.message);}));
     return {...burst};
@@ -119,6 +121,7 @@ for(const locale of supportedLocales)register(locale,require('./i18n/locales/'+l
 const currentLocale=()=>resolveLocale(store?.settings.language||'system',app.getPreferredSystemLanguages());
 const currentAppearance=()=>normalizeAppearance(store?.settings||{},nativeTheme.shouldUseDarkColors);
 const emit=(type,data)=>{if(quitting&&['photo','photoUpdated','burst','series','interval'].includes(type))return;if((type==='settings'||type==='appearance')&&win&&!win.isDestroyed())win.setBackgroundColor(appearanceWindowOptions(currentAppearance()).backgroundColor);if(win&&!win.isDestroyed())win.webContents.send('focal:event',{type,data,...(type==='settings'?{appearance:currentAppearance(),locale:currentLocale()}: {})});if(type==='photo'&&data.cameraTransfer)shotInspector?.photoChanged();if(type==='settings')shotInspector?.publish();if(remote&&['camera','photo','photoUpdated','settings','state','presets','interval','series','burst','captureState','operationState','cameras','focusPreview'].includes(type)){clearTimeout(remoteStateTimer);remoteStateTimer=setTimeout(()=>remote.publishState(),30);}};
+const shutterTrace=createShutterDiagnostics({enabled:process.env.APERTROVE_SHUTTER_TRACE==='1',write:row=>log('info','SHUTTER_TRACE '+JSON.stringify(row))});
 const log=(level,message)=>{const entry={level,message,time:new Date().toISOString()};logs=[...logs.slice(-199),entry];emit('log',entry);};
 const commits=createLibraryCommitter({getStore:()=>store,writeSnapshot:snapshot=>writeLibraryStore(storePath,snapshot),isReady:()=>!!libraryBootstrap?.isReady()});
 const exporter=createProtectedExport({getRegistry:()=>({files:[...store.photos.map(photo=>photo.path),storePath,previousPath(storePath)],directories:[path.dirname(storePath)]}),serialize:operation=>commits.runExclusive(operation)});
@@ -166,6 +169,7 @@ function startWorker(){
     if(!m)return;if(m.generation!==generation){if(m.event==='photo')void channel.consumer.accept(m);return;}
     if(m.type==='operation'){const accepted=channel.rpc.receive(m);if(accepted&&Number.isSafeInteger(m.nativeSessionEpoch))channel.nativeEpoch=Math.max(channel.nativeEpoch,m.nativeSessionEpoch);return;}
     // A late saved file remains accounted for even if its session/worker is old.
+    if(m.event==='shutterDiagnostic'){if(source===worker)shutterTrace(m.data?.phase,m.data);return;}
     if(m.event==='photo'){void channel.consumer.accept(m);return;}
     if(m.event==='nativeObservation'||m.event==='transferIssue'){channel.issue=true;if(m.event==='nativeObservation'){channel.nativeIssue=true;runtimeQuarantined=true;lifecycleIssue('NATIVE_RESULT_UNKNOWN');}else lifecycleIssue('TRANSFER_RESULT_UNKNOWN');log('error',t('operation.transfer_issue'));return;}
     if(!['status','burstReleased','burstProgress','focusInfo','focusPreview','frame','log'].includes(m.event))return;
@@ -377,7 +381,7 @@ function installHandlers(){
     seriesQueue:async({ids})=>{cameraIdle();requireSession();if(!Array.isArray(ids)||ids.length>100||ids.some(id=>typeof id!=='string'||id.length>128))throw Error('Некорректная очередь пресетов.');store.sessions.find(s=>s.id===store.sessionId).presetQueue=[...ids];await persist();emit('state',publicState());return ids;},
     seriesStart:startSeries,
     burstStart:burstFromControl,
-    burstStop:async()=>{if(pendingBurstStart)pendingBurstStart.released=true;if(burstActive()){burst.status='transferring';emit('burst',{...burst});}if(worker)await call('burstStop');return burst;},
+    burstStop:async(args={})=>{shutterTrace('input-release',{...shutterInput(args.input),reason:args.input?.reason,servo:camera.servo?.status,driveMode:camera.properties.driveMode?.value});if(pendingBurstStart)pendingBurstStart.released=true;if(burstActive()){burst.status='transferring';emit('burst',{...burst});}if(worker)await call('burstStop');return burst;},
     seriesStop:()=>{if(seriesActive()){series.cancelled=true;series.status='stopping';emit('series',{...series});}return true;},
     equipment:async()=>{if(camera.connected&&!captureActive&&!seriesActive()&&!burstActive())await call('status');return equipmentCards(camera,store);},
     equipmentPhoto:async({kind})=>{if(!['camera','lens'].includes(kind))throw Error('Неизвестный тип оборудования.');const name=kind==='camera'?camera.model:camera.equipment?.lensName;const media=await productMedia(kind,name,cacheDir);return {...media,image:asset(media.image)};},
