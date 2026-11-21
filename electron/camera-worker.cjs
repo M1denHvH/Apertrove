@@ -24,6 +24,8 @@ const {createFocusHold}=require('./focus-hold.cjs');
 const {profileByFingerprint,createCanonBulbAdapter,bulbExposureSeconds,createFlashPopupControl}=require('./canon-exposure-protocol.cjs');
 const {cameraAccessorySupport}=require('./camera-accessory-support.cjs');
 const {createLiveOrientation,ORIENTATION}=require('./live-orientation.cjs');
+const {createCameraCard,cardProfile}=require('./camera-card.cjs');
+const {createCameraDownload}=require('./camera-download.cjs');
 const parent = process.parentPort;
 const generation=process.argv.find(value=>value.startsWith('--apertrove-generation='))?.slice('--apertrove-generation='.length);
 if(typeof generation!=='string'||!/^[A-Za-z0-9._:-]{1,96}$/.test(generation)||!path.isAbsolute(process.env.APERTROVE_RECOVERY_DESTINATION||''))throw Error('Explicit worker generation and recovery destination required.');
@@ -205,7 +207,8 @@ function loadCandidate(file) {
     seek:fn('EdsSeek','uint32',['void *','int64','uint32']),position:fn('EdsGetPosition','uint32',['void *',koffi.out('uint64 *')]),
     evfRef:fn('EdsCreateEvfImageRef','uint32',['void *',koffi.out('void **')]),evf:fn('EdsDownloadEvfImage','uint32',['void *','void *'])
   };
-  try{sdk.volume=fn('EdsGetVolumeInfo','uint32',['void *',koffi.out(koffi.pointer(VolumeInfo))]);}catch{}
+  try{sdk.volume=fn('EdsGetVolumeInfo','uint32',['void *',koffi.out(koffi.pointer(VolumeInfo))]);sdk.volumeRaw=fn('EdsGetVolumeInfo','uint32',['void *','void *']);}catch{}
+  try{sdk.thumbnail=fn('EdsDownloadThumbnail','uint32',['void *','void *']);}catch{}
   const exported=name=>{try{fn(name,'uint32',[]);return true;}catch{return false;}};
   sdk.exports={volume:!!sdk.volume,propertyDescEx:exported('EdsGetPropertyDescEx'),framePoint:exported('EdsSetFramePoint')};
   // Canon allows one initialization cycle per process, including a failed attempt.
@@ -455,7 +458,7 @@ async function connect({sdkDir,folder,cameraId,readOnly=false,controlsOnly=false
   } catch(e) {await transferProducer.drain();await closeCamera();state.error=e.message;status();throw e;}
   finally {if(list) releaseRef(list,'camera-list-release');}
 }
-function clearCard() {for(const [id,ref] of cardRefs){if(releaseRef(ref,'card-release'))cardRefs.delete(id);}}
+function clearCard() {for(const [id,ref] of cardRefs){if(releaseRef(ref,'card-release'))cardRefs.delete(id);}cameraCard.reset();}
 function failCapture(error){if(!captureWait)return;const waiting=captureWait;captureWait=null;try{waiting.latch?.release();}catch{waiting.releaseUnknown=true;}clearTimeout(waiting.timeout);clearTimeout(waiting.settle);if(waiting.releaseUnknown)error=operationError('OPERATION_UNKNOWN_TERMINATION','Shutter release could not be acknowledged.');transfers.settleCapture(waiting.operationId,{outcome:error?.code==='OPERATION_UNKNOWN_TERMINATION'?'UNKNOWN_TERMINATION':'FAILED'});waiting.reject(error);}
 function settleCapture(){
   const waiting=captureWait;if(!waiting||waiting.latch?.isHolding())return;
@@ -633,11 +636,12 @@ function download(ref,folder,isCapture=false,context) {
     const info={};check(sdk.dir(ref,info),'Информация файла');
     const name=(typeof info.name==='string'?info.name:Buffer.from(info.name).toString()).replace(/\0.*$/,'');
     const size=Number(info.size);if(info.folder||size<=0||size>512*1024*1024) throw Error('Неподдерживаемый размер файла камеры.');
-    const out=[null];check(sdk.stream(size,out),'Буфер импорта');stream=out[0];check(sdk.download(ref,size,stream),'Загрузка снимка');check(sdk.complete(ref),'Завершение загрузки');complete=true;
+    const out=[null];check(sdk.stream(size,out),'Буфер импорта');stream=out[0];check(sdk.download(ref,size,stream),'Загрузка снимка');
     const ptr=[null],length=[0];check(sdk.pointer(stream,ptr),'Чтение снимка');check(sdk.length(stream,length),'Размер снимка');
     fs.mkdirSync(folder,{recursive:true});const ext=path.extname(name),stem=path.basename(name,ext);let i=0;
     const bytes=copyNativeBuffer(ptr[0],Number(length[0]));
     while(true) {target=path.join(folder,`${stem}${i?'_'+i:''}${ext}`);try {fs.writeFileSync(target,bytes,{flag:'wx'});break;}catch(e){if(e.code!=='EEXIST')throw e;i++;}}
+    check(sdk.complete(ref),'Завершение загрузки');complete=true;
     if(isCapture)evidence.capture=true;
     send({event:'photo',photoSequence:++photoSequence,data:{path:target,capture:isCapture,context:{...context,phase:'ORIGINAL_COMMITTED'}}});log('success',`Сохранено: ${path.basename(target)}`);
     if(isCapture&&captureWait){shutterTrace('capture-event',{...captureWait.input,operationId:captureWait.operationId,servo:state.servo?.status});captureWait.observedFiles.push({path:target,transferId:context?.transferId,photoSequence});captureWait.observedTransfers++;send({event:'burstProgress',data:{shots:0,observedTransfers:captureWait.observedTransfers,confirmation:'UNVERIFIED'}});settleCapture();}
@@ -664,18 +668,27 @@ function capture({autofocus=true,folder,burstMs=0,route,captureId,input},operati
 }
 function stopBurst(){try{if(captureWait?.latch)captureWait.latch.release();}catch(error){failCapture(error);throw error;}return {released:true};}
 
-async function listCard() {
-  ensure();if(state.controlsOnly)throw operationError('OPERATION_ADMISSION_CLOSED','Передача файлов отключена для этого подключения.');if(captureWait)throw Error('Дождитесь окончания съёмки.');clearCard();const items=[];let seen=0;
-  const walk=(ref,depth)=>{
-    if(depth>8||seen>10000)return;const count=[0];check(sdk.count(ref,count),'Чтение карты памяти');
-    for(let i=0;i<count[0];i++) {const out=[null];check(sdk.child(ref,i,out),'Файл камеры');const child=out[0];let keep=false;seen++;
-      try {const info={};const code=sdk.dir(child,info);if(depth===0||(!code&&info.folder)){walk(child,depth+1);} else if(!code) {
-        const name=(typeof info.name==='string'?info.name:Buffer.from(info.name).toString()).replace(/\0.*$/,'');
-        if(/\.(jpe?g|cr2|cr3)$/i.test(name)){const id=String(items.length);items.push({id,name,size:Number(info.size)});cardRefs.set(id,child);keep=true;}
-      }}finally {if(!keep)releaseRef(child,'card-item-release');}
-    }
-  };try{walk(camera,0);evidence.card=true;return items;}catch(error){clearCard();throw error;}
+const cardYield=()=>new Promise(resolve=>setImmediate(resolve));
+function cardEnsure(){ensure();if(state.controlsOnly)throw operationError('OPERATION_ADMISSION_CLOSED','File transfer is disabled for this connection.');if(captureWait||controls.isBusy())throw operationError('OPERATION_BUSY','Wait for the camera command to finish.');}
+function cardNative(method,call){let code;try{code=call();}catch(error){teardownUncertain=true;try{observed(method,'download',()=>{throw error;});}catch{}throw operationError('OPERATION_UNKNOWN_TERMINATION','The camera native operation outcome is unknown.');}if(!Number.isInteger(code)||code<0||code>0xffffffff){teardownUncertain=true;observed(method,'download',()=>code);throw operationError('OPERATION_UNKNOWN_TERMINATION','The camera returned an invalid native result.');}return code;}
+function cardInfo(ref){const info={};check(cardNative('EdsGetDirectoryItemInfo',()=>sdk.dir(ref,info)),'Camera file information');return info;}
+function cardChunk(ref,count){
+  const out=[null];let stream;
+  try{check(cardNative('EdsCreateMemoryStream',()=>sdk.stream(count,out)),'Camera download buffer');stream=out[0];check(cardNative('EdsDownload',()=>sdk.download(ref,count,stream)),'Camera download');const pointer=[null],length=[0];check(cardNative('EdsGetPointer',()=>sdk.pointer(stream,pointer)),'Camera buffer');check(cardNative('EdsGetLength',()=>sdk.length(stream,length)),'Camera buffer size');if(Number(length[0])!==count)throw operationError('CARD_DOWNLOAD_SHORT','The camera returned an incomplete file.');return copyNativeBuffer(pointer[0],count);}
+  finally{if(stream)releaseRef(stream,'download-stream-release');}
 }
+const cardDownloader=createCameraDownload({info:cardInfo,chunk:cardChunk,complete:ref=>check(cardNative('EdsDownloadComplete',()=>sdk.complete(ref)),'Camera download completion'),cancel:ref=>check(cardNative('EdsDownloadCancel',()=>sdk.cancel(ref)),'Camera download cancellation'),yield:cardYield,cleanupIssue:()=>send({event:'transferIssue',data:{code:'CARD_TEMPORARY_CLEANUP_FAILED'}})});
+const cameraCard=createCameraCard({
+  ensure:cardEnsure,epoch:()=>sessionEpoch,camera:()=>camera,connected:()=>!!camera&&state.connected&&!teardownUncertain,
+  qualified:()=>cardProfile(state.sdkFingerprint)&&typeof sdk?.volumeRaw==='function',
+  child:(ref,index)=>{const out=[null];check(cardNative('EdsGetChildAtIndex',()=>sdk.child(ref,index,out)),'Camera item');if(!out[0])throw operationError('CARD_REFERENCE_INVALID','The camera returned an invalid item.');return out[0];},
+  count:ref=>{const count=[0];check(cardNative('EdsGetChildCount',()=>sdk.count(ref,count)),'Camera folder');return count[0];},
+  info:cardInfo,release:ref=>releaseRef(ref,'card-item-release'),retain:ref=>{const count=transferReferences.retain(ref);if(!Number.isInteger(count)||count<1||count>=0xffffffff)throw operationError('OPERATION_UNKNOWN_TERMINATION','Camera item retention is unknown.');return ref;},
+  volume:ref=>{const bytes=Buffer.alloc(280);check(cardNative('EdsGetVolumeInfo',()=>sdk.volumeRaw(ref,bytes)),'Camera card information');return {type:bytes.readUInt32LE(0),access:bytes.readUInt32LE(4),capacity:Number(bytes.readBigUInt64LE(8)),free:Number(bytes.readBigUInt64LE(16)),label:bytes.subarray(24,280)};},
+  thumbnail:ref=>{const out=[null];let stream;try{check(sdk.stream(0,out),'Camera thumbnail buffer');stream=out[0];check(sdk.thumbnail(ref,stream),'Camera thumbnail');const pointer=[null],length=[0];check(sdk.pointer(stream,pointer),'Camera thumbnail');check(sdk.length(stream,length),'Camera thumbnail size');const bytes=Number(length[0]);if(!Number.isSafeInteger(bytes)||bytes<3||bytes>8*1024*1024)throw operationError('CARD_THUMBNAIL_INVALID','Camera thumbnail is unavailable.');return copyNativeBuffer(pointer[0],bytes);}finally{if(stream)releaseRef(stream,'thumbnail-stream-release');}},
+  download:(...args)=>cardDownloader.download(...args),yield:cardYield,progress:data=>send({event:'cardExportProgress',data})
+});
+async function listCard(args){return cameraCard.list(args);}
 const controls=createCameraControl({
   onServo:value=>{state.servo=value;status();},onServoUnknown:error=>{send({event:'nativeObservation',data:{method:'EdsSendCommand',phase:'servo-release',classification:'UNKNOWN'}});log('error',error.message);},
   ensure:ensureWorking,refresh,get,set,log,previewFocus,pollFocus:readFocus,focusState:()=>focusSample,requiresLiveFocus:()=>!!state.controlsOnly,focusConfirmationAvailable:()=>!state.controlsOnly,onAutofocus:result=>{if(result.status==='focused')evidence.autofocus=true;state.autofocus={...result,at:Date.now()};if(result.status==='focusing')state.lastFocused=null;status();},canFocus:()=>state.controlsOnly?state.capabilities?.focus!==false&&get(0x416)===1&&[0,1,2].includes(get(0x404)):get(0x404)!==3,isCapturing:()=>!!captureWait||bulb.isBusy(),canBulb:()=>accessoryCapabilities().bulb,isLive:()=>live,
@@ -697,15 +710,15 @@ const handlers={
   focusStart:args=>focusHold.start(args),focusStop:args=>focusHold.stop(args),
   property:controls.property,focus:async args=>{const result=await controls.focus(args);evidence.driveLens=true;return result;},autofocus:controls.autofocus,
   servo:args=>controls.servo(args),servoStop:()=>controls.stopServo(),bulbStart:startBulb,bulbStop:stopBulb,flashSupport:()=>({...flashControl.snapshot(),available:accessoryCapabilities().flashPopup,canAttempt:accessoryCapabilities().flashPopup}),flashPopup:()=>flashControl.popup(),
-  listCard,
-  importCard:async({ids,folder,route},operation)=>{ensure();if(state.controlsOnly)throw operationError('OPERATION_ADMISSION_CLOSED','Передача файлов отключена для этого подключения.');const files=[],context=Object.freeze({sessionEpoch,sessionId:route?.sessionId??null,destination:folder,operationId:operation.operationId,captureId:null,operationType:'CARD_IMPORT',attribution:'EXPLICIT_IMPORT',correlation:'CONFIRMED'});for(const id of ids){operation.cancellation.throwIfRequested();const ref=cardRefs.get(id);if(!ref)throw Error('Список файлов устарел.');files.push(download(ref,folder,false,{...context,transferId:randomUUID()}));await new Promise(r=>setImmediate(r));}operation.cancellation.throwIfRequested();return files;},
+  listCard,cardList:args=>cameraCard.list(args),cardThumbnail:args=>cameraCard.thumbnail(args),cardExport:(args,operation)=>cameraCard.export(args,operation),
+  importCard:(args,operation)=>cameraCard.export(args,operation),
   producerFence:async()=>{operations.stopAdmission();await operations.whenIdle({exclusiveOnly:true});await focusHold.stop();controls.stopServo();await bulb.shutdown();if(bulb.isBusy())throw operationError('OPERATION_UNKNOWN_TERMINATION','Завершение BULB не подтверждено. Проверьте камеру.');await transferProducer.drain();clearTimeout(timer);transferProducer.fence();producersFenced=true;return {drained:true,lastPhotoSequence:photoSequence,nativeStarted,proof:nativeStarted?'unknown':'native-not-started',transfers:transferProducer.snapshot()};},
   finalizeShutdown:async()=>{if(!producersFenced)throw operationError('OPERATION_ADMISSION_CLOSED','A producer fence is required before teardown.');shuttingDown=true;await transferProducer.drain();await closeCamera();await new Promise(resolve=>setImmediate(resolve));const released=releaseSdk();if(released&&com)observed('CoUninitialize','com-uninitialize',()=>com(),'void');send({event:'shutdown'});setTimeout(()=>process.exit(teardownUncertain?1:0),20);return {closed:true,lastPhotoSequence:photoSequence,nativeStarted,proof:nativeStarted?'unknown':'native-not-started',observations:observations.snapshot(),transfers:transferProducer.snapshot()};}
 };
 // Safety shutter release must bypass held/unknown Servo guards. Blocking burstStop
 // leaves the full press active until holdShutter's 5-second watchdog fires.
 const operationHandlers=Object.fromEntries(Object.entries(handlers).map(([method,handler])=>[method,async(args,context)=>{const owned=!['status','burstStop','servoStop','bulbStop','focusStop','producerFence'].includes(method);if(owned)currentOperation={method,operationId:context.operationId};try{if(focusHold.isBusy()&&!['status','burstStop','servoStop','bulbStop','focusStop','disconnect','producerFence','finalizeShutdown'].includes(method))throw operationError('OPERATION_BUSY','Дождитесь завершения текущей команды камеры.');if(teardownUncertain&&!['status','burstStop','servoStop','bulbStop','focusStop','producerFence','finalizeShutdown'].includes(method))throw operationError('OPERATION_UNKNOWN_TERMINATION','Native teardown state is unverified.');if(bulb.isBusy()&&!['status','burstStop','bulbStop','focusStop','disconnect','producerFence','finalizeShutdown'].includes(method))throw operationError('OPERATION_BUSY','BULB-экспозиция ещё не завершена.');if(controls.isServoHeld()&&!['status','capture','burstStop','servoStop','bulbStop','focusStop','servo','property','live','disconnect','producerFence','finalizeShutdown'].includes(method))throw operationError('OPERATION_BUSY','Остановите AI Servo перед другой командой камеры.');if(state.servo.enabled===null&&state.connected&&!['status','burstStop','servoStop','focusStop','disconnect','producerFence','finalizeShutdown'].includes(method))throw operationError('OPERATION_UNKNOWN_TERMINATION','Остановка AI Servo не подтверждена. Отключите камеру.');return await handler(args,context);}finally{if(currentOperation?.operationId===context.operationId)currentOperation=null;}}]));
-const operations=createOperationHost({generation,handlers:operationHandlers,send,getSessionEpoch:()=>sessionEpoch});
+const operations=createOperationHost({generation,handlers:operationHandlers,send,getSessionEpoch:()=>sessionEpoch,isCancellable:method=>['importCard','cardExport'].includes(method)});
 async function receive(message) {if(shuttingDown)return;if(message?.type==='emergencyRelease'&&message.generation===generation){try{stopBurst();controls.stopServo();await focusHold.stop();await stopBulb();}catch{send({event:'transferIssue',data:{code:'EMERGENCY_RELEASE_UNKNOWN'}});}return;}await operations.receive(message);}
 if(parent)parent.on('message',({data})=>receive(data));else process.on('message',receive);
 setInterval(()=>{if(camera&&!producersFenced&&!teardownUncertain)try{refresh();}catch(e){log('error',e.message);}},2500).unref();
