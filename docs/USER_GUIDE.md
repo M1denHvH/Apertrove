@@ -54,7 +54,9 @@ Switching Servo does not perform a One Shot attempt. A running Servo command can
 
 Command acceptance is different from confirmed sharpness or subject tracking. Inspect the preview and the received photograph. Lens AF/MF state and the camera's supported focus route affect availability.
 
-**Nearer** and **Farther** send electronic lens steps where supported. Use the step size to control their amount; they require a compatible lens and camera state.
+Hold **Nearer** or **Farther** to keep moving focus; release to stop. The step-size control sets the amount of each electronic lens step. Apertrove sends one step at a time, then waits 300 ms before the next; a slow camera does not build up a queue. A compatible lens and camera state are required.
+
+An already active Live View stays on throughout the hold. When preview is off, the current lens-drive path opens a temporary preview once for the whole hold and restores its previous state afterward. It does not start and stop preview around every step. Lens movement without EVF has not been verified for every camera.
 
 ![The unified AF control with demo Servo active](screenshots/autofocus.png)
 
@@ -72,9 +74,9 @@ These controls become available only for verified camera/runtime combinations. T
 
 Use **Raise flash** when offered for a camera with a built-in flash. Check the camera after the request: an accepted command alone does not confirm the mechanism's position. Flash mode, firing and physical pop-up remain separate operations.
 
-For a long exposure, set **BULB** on the camera, or choose Bulb in the shutter-speed control when offered. Press **Start BULB**, then **End BULB** to end the exposure. Other incompatible shooting actions stay unavailable while it is active. Elapsed time appears only when the camera reports it; a waiting message is not a local estimate.
+For a long exposure, set **BULB** on the camera, or choose Bulb in the shutter-speed control when offered. Press and hold **Hold for BULB** for the exposure, then release to finish. Space/Enter on the focused button works the same way. Releasing outside the button, cancelling the input, switching away or losing focus ends the hold. There is no preset maximum exposure time. Other incompatible shooting actions stay unavailable while it is active. Elapsed time appears only when the camera reports it.
 
-If a stop fails or the connection is lost, the exposure may still be active. Check the camera and follow the displayed recovery instruction before starting another operation. Do not assume the shutter closed because the preview or app window changed.
+If a stop fails or the connection is lost, the exposure may still be active. Check the camera and use **End BULB** to retry stopping when offered before starting another operation. This recovery action is separate from normal hold control. Do not assume the shutter closed because the preview or app window changed.
 
 ## 5. Review what arrived
 
@@ -129,6 +131,8 @@ For folder-based import, open a session, choose a separate incoming folder and s
 ## 8. Use a phone and make the workspace yours
 
 In **Web Remote**, choose the PC's private network interface and start the server. Open its QR link on a phone in the same trusted LAN. The link authorizes access: keep it private and stop the server when finished. The camera stays on USB; the remote provides a restricted subset of desktop controls.
+
+BULB and **Nearer/Farther** use the same press-and-hold control on the phone, including touch. Release, page departure or a lost connection ends the remote's owned hold. Connection loss can take time to detect; check the camera if the network fails during an exposure.
 
 In **Settings**, choose language, light/dark/system theme, Studio / Canon Classic / Modern style, accent color and Performance Mode. Storage, Canon setup, the welcome guide and interactive tutorial are here too.
 

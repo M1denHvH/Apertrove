@@ -27,7 +27,7 @@ Connect a compatible Canon EOS camera by USB, or start with photographs already 
 
 **Frame before you shoot.** Live View brings the preview to your monitor with zoom, composition guides and a small RGB histogram toggle. Rotate the preview by hand, or use current orientation data when the camera and runtime supply it.
 
-**Keep focus close at hand.** One AF control contains One Shot AF and an AI Servo switch. Exposure, white balance, image quality and electronic lens steps follow the controls your camera actually offers. A running Servo command can stay active while you use the shutter.
+**Keep focus close at hand.** One AF control contains One Shot AF and an AI Servo switch. Hold Nearer/Farther for repeated electronic lens steps and release to stop. Exposure, white balance and image quality follow the controls your camera actually offers. A running Servo command can stay active while you use the shutter.
 
 **Give every shoot its own place.** Create a named session with a folder, client and notes. Resume it later, review its photographs together, and reuse camera presets. Preset sequences and interval tools are available for supported setups.
 
@@ -98,7 +98,7 @@ Windows x64 is the current target. Canon DLLs and proprietary headers are **not 
 
 The project is still gathering camera testing reports. Earlier hardware checks cover a limited set of camera reads, exposure controls and Live View. Newer Servo, orientation and capture workflows also have automated fake-provider coverage, which cannot prove optical focus, physical shutter behavior or compatibility with every camera.
 
-Development builds include built-in flash pop-up and BULB controls for verified camera/runtime combinations. On the tested setup, the user confirmed flash pop-up with Live View both off and on in the current development build, without stopping or restarting the preview. Limited hardware checks also cover a three-second BULB exposure and brief shutter inputs with Servo off and on. These results do not establish support for every camera. See [camera support and testing notes](docs/COMPATIBILITY.md).
+Development builds include built-in flash pop-up and press-and-hold BULB controls for verified camera/runtime combinations, on desktop and Web Remote. On the tested setup, the user confirmed flash pop-up with Live View both off and on in the current development build, without stopping or restarting the preview. Limited hardware checks also cover a three-second BULB exposure and brief shutter inputs with Servo off and on. These results do not establish support for every camera. See [camera support and testing notes](docs/COMPATIBILITY.md).
 
 ## Help us test more cameras
 
