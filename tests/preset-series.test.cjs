@@ -10,12 +10,12 @@ test('A preset queue validates every step before capture and keeps repeat/order 
 });
 test('Exactly one capture follows each verified preset, then all original values are restored',async()=>{
   const values={iso:0x48,shutter:0x60},shots=[];const state=job();
-  await runSeries(prepareSeries(['a','b'],presets,camera),{property:async({key,value})=>{values[key]=value;},capture:async metadata=>shots.push({...values,metadata}),progress:()=>{}},state);
+  await runSeries(prepareSeries(['a','b'],presets,camera),{property:async({key,value})=>{values[key]=value;},capture:async metadata=>{shots.push({...values,metadata});return {confirmation:'CONFIRMED'};},progress:()=>{}},state);
   assert.equal(shots.length,2);assert.equal(shots[0].iso,0x50);assert.equal(shots[1].iso,0x58);assert.equal(shots[1].shutter,0x70);assert.equal(shots[1].metadata.index,1);assert.deepEqual(values,{iso:0x48,shutter:0x60});assert.equal(state.status,'completed');
 });
 test('Cancellation during a frame saves that frame, prevents subsequent shots and restores exposure',async()=>{
   const state=job(),writes=[];let shots=0;
-  await runSeries(prepareSeries(['a','b'],presets,camera),{property:async p=>writes.push(p),capture:async()=>{shots++;state.cancelled=true;},progress:()=>{}},state);
+  await runSeries(prepareSeries(['a','b'],presets,camera),{property:async p=>writes.push(p),capture:async()=>{shots++;state.cancelled=true;return {confirmation:'CONFIRMED'};},progress:()=>{}},state);
   assert.equal(shots,1);assert.equal(state.done,1);assert.equal(state.status,'cancelled');assert.deepEqual(writes.at(-2),{key:'iso',value:0x48});assert.deepEqual(writes.at(-1),{key:'shutter',value:0x60});
 });
 test('Failed property writes never release the shutter, and restoration failures are visible',async()=>{
@@ -25,5 +25,10 @@ test('Failed property writes never release the shutter, and restoration failures
 });
 test('A native timer/burst mode is changed to single-shot for the queue and restored afterwards',async()=>{
   const state=job(),writes=[];const plan=prepareSeries(['a'],presets,{...camera,properties:{...camera.properties,driveMode:{value:1,allowed:[0,1,16],writable:true}}});
-  await runSeries(plan,{property:async p=>writes.push(p),capture:async()=>{},progress:()=>{}},state);assert.deepEqual(writes[0],{key:'driveMode',value:0});assert.ok(writes.some(p=>p.key==='driveMode'&&p.value===1));assert.equal(state.status,'completed');
+  await runSeries(plan,{property:async p=>writes.push(p),capture:async()=>({confirmation:'CONFIRMED'}),progress:()=>{}},state);assert.deepEqual(writes[0],{key:'driveMode',value:0});assert.ok(writes.some(p=>p.key==='driveMode'&&p.value===1));assert.equal(state.status,'completed');
+});
+test('An unconfirmed capture is never counted as a saved frame',async()=>{
+  const state=job();
+  await runSeries(prepareSeries(['a'],presets,camera),{property:async()=>{},capture:async()=>({confirmation:'UNVERIFIED',observedTransfers:1}),progress:()=>{}},state);
+  assert.equal(state.requested,1);assert.equal(state.done,0);assert.equal(state.status,'unconfirmed');assert.equal(state.confirmation,'UNVERIFIED');assert.equal(state.observedTransfers,1);
 });

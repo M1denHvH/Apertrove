@@ -1,7 +1,7 @@
-const { PROPS } = require('./camera-values.cjs');
+const { PROPS, WHITE_BALANCE_COLOR_TEMPERATURE } = require('./camera-values.cjs');
 const NAMES = {
   iso: 'ISO', shutter: 'Выдержка', aperture: 'Диафрагма', compensation: 'Экспокоррекция',
-  whiteBalance: 'Баланс белого', pictureStyle: 'Picture Style', meteringMode: 'Замер экспозиции',
+  whiteBalance: 'Баланс белого', colorTemperature: 'Цветовая температура', pictureStyle: 'Picture Style', meteringMode: 'Замер экспозиции',
   driveMode: 'Режим протяжки', imageQuality: 'Формат кадра', afMode: 'Режим AF', liveAfMode: 'Метод AF Live View'
 };
 const hex = code => '0x' + (code >>> 0).toString(16).toUpperCase();
@@ -18,6 +18,10 @@ function capabilityReport({ state, read, storage, exports, restricted, evidence 
   for (const [key, id] of Object.entries(PROPS)) {
     const property = state.properties[key];
     const group = ['afMode', 'liveAfMode'].includes(key) ? 'Фокус' : 'Экспозиция и параметры';
+    if(key==='colorTemperature'&&state.properties.whiteBalance?.value!==WHITE_BALANCE_COLOR_TEMPERATURE){
+      add(group,key,NAMES[key],'temporary','Доступно, когда баланс белого установлен на цветовую температуру.');
+      continue;
+    }
     const data = read(id);
     if (data.code) probe(group, key, NAMES[key], data, 'Чтение свойства');
     else {
@@ -29,7 +33,7 @@ function capabilityReport({ state, read, storage, exports, restricted, evidence 
     }
   }
   probe('Экспозиция и параметры', 'mode', 'Режим съёмки', read(0x400), 'Чтение положения диска');
-  for (const [id, label, prop] of [['colorTemperature','Цветовая температура',0x107],['availableShots','Оставшиеся кадры',0x40a],['lens','Объектив',0x40d]])
+  for (const [id, label, prop] of [['availableShots','Оставшиеся кадры',0x40a],['lens','Объектив',0x40d]])
     probe('Экспозиция и параметры', id, label, read(prop), 'Чтение свойства');
   const captureGroup = 'Затвор и съёмка';
   const evfGroup = 'Live View';
@@ -55,14 +59,14 @@ function capabilityReport({ state, read, storage, exports, restricted, evidence 
   add(focusGroup, 'driveLens', 'Электронная доводка фокуса', restricted ? 'unsupported' : mf || evf.code ? 'temporary' : evidence.driveLens ? 'ready' : 'unknown', mf ? 'Объектив в MF.' : 'Требуется совместимый объектив и доступный Live View.');
   const focus = read(0x104);
   add(focusGroup, 'focusInfo', 'Информация о точках фокуса', evidence.focusInfo ? 'ready' : readStatus(focus.code), focus.code ? `Чтение на камере · ${hex(focus.code)}. Данные могут появиться в EVF.` : 'Камера отдаёт блок FocusInfo.');
-  add(storageGroup, 'volumes', 'Носители камеры', storage.volumes.length ? 'ready' : storage.code ? readStatus(storage.code) : exports.volume ? 'temporary' : 'unknown',
-    storage.volumes.length ? `Носителей с доступной информацией: ${storage.volumes.length}` : storage.code ? `Чтение носителей · ${hex(storage.code)}` : 'SDK не вернул доступный носитель.');
-  add(storageGroup, 'cardFiles', 'Папки, файлы и импорт с карты', evidence.card ? 'ready' : storage.volumes.some(v => v.type !== 0 && [0, 2].includes(v.access)) ? 'unknown' : 'temporary', 'Проверяется при открытии импорта с карты. Диагностика не обходит весь носитель.');
+  add(storageGroup, 'volumes', 'Носители камеры', storage.volumes.length ? 'ready' : storage.unverifiedLayout ? 'unknown' : storage.code ? readStatus(storage.code) : exports.volume ? 'temporary' : 'unknown',
+    storage.volumes.length ? `Носителей с доступной информацией: ${storage.volumes.length}` : storage.unverifiedLayout ? 'Volume details were skipped because the EdsGetVolumeInfo layout is not qualified for this runtime.' : storage.code ? `Чтение носителей · ${hex(storage.code)}` : 'SDK не вернул доступный носитель.');
+  add(storageGroup, 'cardFiles', 'Папки, файлы и импорт с карты', evidence.card ? 'ready' : storage.unverifiedLayout ? 'unknown' : storage.volumes.some(v => v.type !== 0 && [0, 2].includes(v.access)) ? 'unknown' : 'temporary', storage.unverifiedLayout ? 'Card access was not probed; diagnostics do not traverse the card file tree.' : 'Проверяется при открытии импорта с карты. Диагностика не обходит весь носитель.');
   const destination=read(0xb);
   const target=destination.buffer?.length===4?destination.buffer.readUInt32LE():null;
   probe(storageGroup, 'saveTo', 'Место сохранения', destination, ({1:'Карта памяти',2:'Компьютер',3:'Карта и компьютер'})[target]||'Чтение текущего назначения');
-  add(storageGroup, 'transfer', 'Передача снимка на ПК', evidence.capture ? 'ready' : 'unknown', 'Обработчик передачи зарегистрирован; результат подтверждает полученный файл.');
-  add('События и дополнительные функции', 'events', 'События файлов, параметров и состояния', 'ready', 'SDK принял регистрацию трёх обработчиков.');
+  add(storageGroup, 'transfer', 'Передача снимка на ПК', evidence.capture ? 'ready' : 'unknown', state.eventsRegistered ? 'Обработчик передачи зарегистрирован; результат подтверждает полученный файл.' : 'Проверяется при рабочем подключении. Диагностика не принимает файлы.');
+  add('События и дополнительные функции', 'events', 'События файлов, параметров и состояния', state.eventsRegistered ? 'ready' : 'unknown', state.eventsRegistered ? 'SDK принял регистрацию трёх обработчиков.' : 'События проверяются при рабочем подключении.');
   add('События и дополнительные функции', 'video', 'Управление видеозаписью', 'unimplemented', 'Доступность зависит от модели, версии SDK и видеорежима. Запись не запускалась.');
   return rows;
 }

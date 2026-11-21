@@ -2,7 +2,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const koffi = require('koffi');
-const {PROPS,choices} = require('./camera-values.cjs');
+const {PROPS,choices,WHITE_BALANCE_COLOR_TEMPERATURE} = require('./camera-values.cjs');
 const {parseFocusInfo}=require('./focus-info.cjs');
 const {quietPeriod}=require('./capture-timing.cjs');
 const {holdShutter}=require('./shutter-latch.cjs');
@@ -12,10 +12,80 @@ const {describeCamera,modelCapabilities,selectCamera} = require('./camera-discov
 const {isUnsupportedCommand,configureDestination}=require('./camera-destinations.cjs');
 const {sdkCandidates,fileVersion}=require('./sdk-environment.cjs');
 const {capabilityReport}=require('./camera-capabilities.cjs');
+const {randomUUID}=require('node:crypto');
+const {createOperationHost,operationError}=require('./operation-lifecycle.cjs');
+const {createTransferContexts}=require('./transfer-context.cjs');
+const {createTransferProducer}=require('./transfer-producer.cjs');
+const {createNativeObservations}=require('./native-observations.cjs');
+const {createSdkInitializationGate}=require('./sdk-initialization.cjs');
 const parent = process.parentPort;
-const send = value => parent ? parent.postMessage(value) : process.send?.(value);
+const generation=process.argv.find(value=>value.startsWith('--apertrove-generation='))?.slice('--apertrove-generation='.length);
+if(typeof generation!=='string'||!/^[A-Za-z0-9._:-]{1,96}$/.test(generation)||!path.isAbsolute(process.env.APERTROVE_RECOVERY_DESTINATION||''))throw Error('Explicit worker generation and recovery destination required.');
+const send = value => {const message=value.type==='operation'?value:{...value,generation,sessionEpoch};return parent ? parent.postMessage(message) : process.send?.(message);};
 let sdk, library, com, dllDirectory, bindings, camera=null, initialized=false, live=false, callbacks=[], timer, cardRefs=new Map(), captureWait=null, destination='', shuttingDown=false;
-let sessionEpoch=0, sessionOpened=false, restricted=false, evidence={}, environmentChecks=[], evfRestore=null;
+let sessionEpoch=0, sessionOpened=false, sessionEventsRegistered=false, restricted=false, evidence={}, environmentChecks=[], evfRestore=null;
+let controlAfStopPending=false;
+let nativeStarted=false,producersFenced=false,photoSequence=0,teardownUncertain=false,currentOperation=null;
+const initializationGate=createSdkInitializationGate();
+const quarantinedNativeRefs=new Set();
+const observations=createNativeObservations(),transfers=createTransferContexts({recoveryDestination:process.env.APERTROVE_RECOVERY_DESTINATION,newId:randomUUID});
+transfers.setRoute({sessionEpoch,sessionId:null,destination:''});
+function observed(method,phase,fn,kind='error-code'){
+  try{const code=fn(),entry=observations.observe({operation:phase==='event-pump'?'event-pump':currentOperation?.method||'native',operationId:currentOperation?.operationId,phase,method,code,kind});if(entry.failure&&entry.count===1)send({event:'nativeObservation',data:entry});return code;}
+  catch(error){observations.failure({operation:currentOperation?.method||'native',operationId:currentOperation?.operationId,phase,method,error});send({event:'nativeObservation',data:{method,phase,classification:'UNKNOWN'}});throw error;}
+}
+function releaseRef(ref,phase='release'){
+  if(!ref||!sdk)return true;
+  if(teardownUncertain){if(quarantinedNativeRefs.size<10000)quarantinedNativeRefs.add(ref);return false;}
+  try{
+    const count=observed('EdsRelease',phase,()=>sdk.release(ref),'reference-count');
+    if(!Number.isInteger(count)||count<0||count>0xffffffff||count===0xffffffff){
+      teardownUncertain=true;
+      if(quarantinedNativeRefs.size<10000)quarantinedNativeRefs.add(ref);
+      return false;
+    }
+    return true;
+  }catch{
+    teardownUncertain=true;
+    if(quarantinedNativeRefs.size<10000)quarantinedNativeRefs.add(ref);
+    return false;
+  }
+}
+function openCameraSession(){
+  let result;
+  try{result=sdk.open(camera);}
+  catch(error){
+    // A binding exception does not tell us whether the native call took effect.
+    observations.failure({operation:currentOperation?.method||'connect',operationId:currentOperation?.operationId,phase:'session-open',method:'EdsOpenSession',error});
+    send({event:'nativeObservation',data:{method:'EdsOpenSession',phase:'session-open',classification:'UNKNOWN'}});
+    teardownUncertain=true;
+    throw operationError('OPERATION_UNKNOWN_TERMINATION','OpenSession completion is unknown; the worker cannot safely continue.');
+  }
+  if(!Number.isInteger(result)||result<0||result>0xffffffff){
+    const error=Object.assign(Error('OpenSession returned an invalid EdsError value.'),{code:'JS_EXCEPTION'});
+    observations.failure({operation:currentOperation?.method||'connect',operationId:currentOperation?.operationId,phase:'session-open',method:'EdsOpenSession',error});
+    send({event:'nativeObservation',data:{method:'EdsOpenSession',phase:'session-open',classification:'UNKNOWN'}});
+    teardownUncertain=true;
+    throw operationError('OPERATION_UNKNOWN_TERMINATION','OpenSession returned an invalid native result; the worker cannot safely continue.');
+  }
+  if(result)check(result,'Открытие камеры');
+  sessionOpened=true;
+}
+const transferReferences=Object.freeze({
+  retain:ref=>{
+    if(!sdk)return 0xffffffff;
+    try{return observed('EdsRetain','reference',()=>sdk.retain(ref),'reference-count');}
+    catch(error){teardownUncertain=true;if(quarantinedNativeRefs.size<10000)quarantinedNativeRefs.add(ref);throw error;}
+  },
+  release:ref=>releaseRef(ref,'transfer-release')?0:0xffffffff
+});
+const transferProducer=createTransferProducer({contexts:transfers,getEpoch:()=>sessionEpoch,getSdk:()=>sdk?transferReferences:null,isConnected:()=>!!camera,download:(...args)=>download(...args),onIssue:issue=>{
+  if(issue.code==='TRANSFER_REFERENCE_RETAIN_FAILED'||issue.code==='TRANSFER_REFERENCE_RELEASE_FAILED'){
+    teardownUncertain=true;
+  }
+  send({event:'transferIssue',data:issue});
+}});
+function setDeliveryRoute({route,folder}={}){return transfers.setRoute({sessionEpoch,sessionId:route?.sessionId??null,destination:route?.destination??folder??destination});}
 let focusSample={sequence:0,status:"unknown"},focusSampleAt=0;
 let evfStream=null,evfImage=null,statsAt=performance.now(),statsFrames=0,statsBytes=0,totalFrames=0,propertyRefreshPending=false;
 const state={connected:false,live:false,model:null,battery:null,properties:{},sdkPath:null,error:null};
@@ -29,28 +99,42 @@ const errors={0x81:'Камера занята. Дождитесь заверше
 function check(code,action) { if(code){const messages={...errors,0x7:'Команда не поддерживается этой камерой или версией SDK.',0x20:'Ошибка чтения или записи файла.',0x60:'Камера отклонила значение параметра.'};const error=Error(`${action}: ${messages[code&0xffff]||'ошибка Canon'} (0x${code.toString(16).toUpperCase()}).`);error.code=code;throw error;} }
 function releaseSdk() {
   clearTimeout(timer);
-  if(initialized){sdk.terminate();initialized=false;}
-  for(const callback of callbacks)koffi.unregister(callback);
+  if(teardownUncertain)return false;
+  if(initialized){try{if(observed('EdsTerminateSDK','sdk-terminate',()=>sdk.terminate())!==0){teardownUncertain=true;return false;}initialized=false;}catch{teardownUncertain=true;return false;}}
+  const retained=[];for(const callback of callbacks)try{observed('koffi.unregister','callback-unregister',()=>koffi.unregister(callback),'void');}catch{retained.push(callback);}
+  if(retained.length){callbacks=retained;teardownUncertain=true;return false;}
   callbacks=[];
   sdk=null;
-  library?.unload();
+  if(library)try{observed('library.unload','library-unload',()=>library.unload(),'void');}catch{teardownUncertain=true;return false;}
   library=null;
-  dllDirectory?.(null);
+  if(dllDirectory)try{observed('SetDllDirectoryW','cleanup',()=>dllDirectory(null),'boolean');}catch{}
   state.sdkPath=null;
+  return true;
 }
 function load(custom) {
-  if(sdk) return;
-  environmentChecks=sdkCandidates(custom);
-  for(const entry of environmentChecks){
-    if(entry.architecture!==process.arch){entry.result='architecture';continue;}
-    try{loadCandidate(entry.file);entry.result='ready';break;}
-    catch(error){entry.result='error';entry.error=error.message;releaseSdk();}
+  if(teardownUncertain)throw operationError('OPERATION_UNKNOWN_TERMINATION','Native cleanup could not be acknowledged.');
+  if(initialized) return;
+  if(!initializationGate.attempted){
+    environmentChecks=sdkCandidates(custom);
+    for(const entry of environmentChecks){
+      if(entry.architecture!==process.arch){entry.result='architecture';continue;}
+      try{loadCandidate(entry.file);entry.result='ready';return;}
+      catch(error){
+        entry.result='error';entry.error=error.message;
+        if(!releaseSdk())throw operationError('OPERATION_UNKNOWN_TERMINATION','Native cleanup could not be acknowledged.');
+        if(initializationGate.attempted)break;
+      }
+    }
   }
-  if(!sdk)throw Error(environmentChecks.some(entry=>entry.result==='error')?'Не удалось загрузить SDK Canon. Проверьте зависимости DLL и папку установки.':'Совместимая EDSDK.dll не найдена. Установите ПО Canon или укажите папку официального SDK.');
+  throw Error(environmentChecks.some(entry=>entry.result==='error')?'Не удалось загрузить SDK Canon. Проверьте зависимости DLL и папку установки.':'Совместимая EDSDK.dll не найдена. Установите ПО Canon или укажите папку официального SDK.');
 }
 function loadCandidate(file) {
+  nativeStarted=true;
   const kernel=koffi.load('kernel32.dll');
-  dllDirectory??=kernel.func('bool __stdcall SetDllDirectoryW(str16 path)');
+  if(!dllDirectory){
+    const setDirectory=kernel.func('int32 __stdcall SetDllDirectoryW(str16 path)');
+    dllDirectory=directory=>setDirectory(directory)!==0;
+  }
   if(!dllDirectory(path.dirname(file)))throw Error('Windows не приняла каталог зависимостей SDK.');
   if(!com){
     const ole=koffi.load('ole32.dll');
@@ -90,18 +174,18 @@ function loadCandidate(file) {
   try{sdk.volume=fn('EdsGetVolumeInfo','uint32',['void *',koffi.out(koffi.pointer(VolumeInfo))]);}catch{}
   const exported=name=>{try{fn(name,'uint32',[]);return true;}catch{return false;}};
   sdk.exports={volume:!!sdk.volume,propertyDescEx:exported('EdsGetPropertyDescEx'),framePoint:exported('EdsSetFramePoint')};
-  check(sdk.init(),'Инициализация EDSDK'); initialized=true;state.sdkPath=file;
+  // Canon allows one initialization cycle per process, including a failed attempt.
+  initializationGate.run(()=>check(sdk.init(),'Инициализация EDSDK')); initialized=true;state.sdkPath=file;
   const objCb=koffi.register((event,obj)=>{
+    if(!sdk){send({event:'transferIssue',data:{code:'CALLBACK_AFTER_SDK_CLOSE'}});return 0;}
     if(obj) {
       if(event===0x208) {
-        if(!state.working){sdk.cancel(obj);}
+        if(!state.working){if(producersFenced||shuttingDown||teardownUncertain)send({event:'transferIssue',data:{code:'TRANSFER_NOT_DOWNLOADABLE'}});observed('EdsDownloadCancel','download',()=>sdk.cancel(obj));}
         else {
-          const epoch=sessionEpoch, currentSdk=sdk;
-          sdk.retain(obj);
-          setImmediate(()=>{try { if(epoch===sessionEpoch&&camera)download(obj,destination,true); } catch(e) { log('error',e.message); failCapture(e); } finally {currentSdk.release(obj);} });
+          try{transferProducer.admit(obj);}catch{send({event:'transferIssue',data:{code:'TRANSFER_ADMISSION_FAILED'}});}
         }
       }
-      sdk.release(obj);
+      releaseRef(obj,'callback-release');
     }
     return 0;
   },koffi.pointer(ObjectEvent));callbacks.push(objCb);
@@ -113,14 +197,14 @@ function loadCandidate(file) {
   },koffi.pointer(StateEvent));
   callbacks.push(stateCb);
   function pump(){
-    if(shuttingDown)return;let delay=20;
-    try{sdk.event();if(camera&&live&&!captureWait&&controls.canStream())delay=frame()?0:3;}catch(e){log('error',e.message);}
+    if(shuttingDown||teardownUncertain)return;let delay=20;
+    try{observed('EdsGetEvent','event-pump',()=>sdk.event());if(camera&&live&&!captureWait&&controls.canStream())delay=frame()?0:3;}catch{/* The bounded observation and parent notification retain this failure. */}
     timer=setTimeout(pump,delay);
   }
   timer=setTimeout(pump,0);
 }
 function get(id) {const buf=Buffer.alloc(4);if(sdk.get(camera,id,0,4,buf)) return null;return buf.readUInt32LE();}
-function set(id,value) {const buf=Buffer.alloc(4);buf.writeUInt32LE(value>>>0);check(sdk.set(camera,id,0,4,buf),'Изменение параметра');}
+function set(id,value) {if(state.controlsOnly&&![PROPS.iso,PROPS.shutter,PROPS.aperture,PROPS.compensation,0x500,0x501].includes(id))throw Error('Это свойство недоступно в подключении без передачи файлов.');const buf=Buffer.alloc(4);buf.writeUInt32LE(value>>>0);check(sdk.set(camera,id,0,4,buf),'Изменение параметра');}
 function probeData(id,ref=camera){
   if(!camera)return {code:0x80};const type=[0],size=[0];
   const sizeCode=sdk.propertySize(ref,id,0,type,size);
@@ -134,46 +218,36 @@ function refresh() {
   if(!camera) return status();
   state.battery=get(0x8);const focal=readData(0x409);state.equipment={firmware:textProperty(0x7),lensName:textProperty(0x40d),lensAttached:get(0x416)===1,availableShots:get(0x40a),focalLength:focal?.buffer.length===8&&focal.buffer.readUInt32LE(4)?focal.buffer.readUInt32LE(0)/focal.buffer.readUInt32LE(4):null};
   const mode=get(0x400);state.mode=({0:'P',1:'Tv',2:'Av',3:'M',4:'Bulb',9:'Auto'})[mode]||String(mode??'—');
+  if(state.controlsOnly){state.evfState={output:get(0x500),mode:get(0x501)};state.observedSaveTo=get(0xb);}
   if(state.working&&!restricted&&get(0x500)!==null){state.capabilities.liveView=true;state.capabilities.manualFocus=true;}
   for(const [key,id] of Object.entries(PROPS)) {
+    if(key==='colorTemperature'&&state.properties.whiteBalance?.value!==WHITE_BALANCE_COLOR_TEMPERATURE){state.properties[key]={value:null,choices:[],writable:false};continue;}
     const current=get(id);if(current===null) {state.properties[key]={value:null,choices:[],writable:false};continue;}
     const desc={};const code=sdk.desc(camera,id,desc);
     const allowed=code?[]:Array.from(desc.values||[]).slice(0,Math.max(0,Math.min(desc.count||0,128))).map(v=>v>>>0);
-    state.properties[key]={value:current,allowed,choices:choices(key,allowed,current),descriptorCode:code,writable:!code&&allowed.length>0&&!(key==='afMode'&&current===3&&!allowed.includes(3))};
+    state.properties[key]={value:current,allowed,choices:choices(key,allowed,current),descriptorCode:code,writable:!code&&allowed.length>0&&(!state.controlsOnly||['iso','shutter','aperture','compensation'].includes(key))&&!(key==='afMode'&&current===3&&!allowed.includes(3))};
   }
   return status();
 }
 function listCameras({sdkDir}={}){
   load(sdkDir);let list=null;
   try{const out=[null];check(sdk.list(out),'Поиск камер');list=out[0];const count=[0];check(sdk.count(list,count),'Поиск камер');const items=[];
-    for(let index=0;index<count[0];index++){const ref=[null];check(sdk.child(list,index,ref),'Чтение камеры');try{const info={};check(sdk.info(ref[0],info),'Информация камеры');items.push(describeCamera(info,index));}finally{sdk.release(ref[0]);}}
+    for(let index=0;index<count[0];index++){const ref=[null];check(sdk.child(list,index,ref),'Чтение камеры');try{const info={};check(sdk.info(ref[0],info),'Информация камеры');items.push(describeCamera(info,index));}finally{releaseRef(ref[0],'camera-discovery-release');}}
     return items;
-  }finally{if(list)sdk.release(list);}
+  }finally{if(list)releaseRef(list,'camera-list-release');}
 }
 async function sdkEnvironment({sdkDir,recheck=false}={}){
+  if(recheck)throw operationError('OPERATION_ADMISSION_CLOSED','Runtime recheck requires main-process worker replacement.');
   let error=null;
-  if(recheck&&!camera&&sdk)releaseSdk();
-  try{load(sdkDir);}catch(e){error=e.message;}
+  try{load(sdkDir);}catch(e){if(teardownUncertain||e.code==='OPERATION_UNKNOWN_TERMINATION')throw e;error=e.message;}
   const file=state.sdkPath;
   const version=file?await fileVersion(file):null;
   return {status:file?'ready':environmentChecks.some(entry=>entry.result==='error')?'error':'missing',architecture:process.arch,file,version,checks:environmentChecks,optional:sdk?.exports||{},error};
 }
 function cameraStorage(){
-  if(!sdk.volume)return {volumes:[],code:0};
-  const volumes=[], count=[0];
-  let code=sdk.count(camera,count);
-  if(code)return {volumes,code};
-  for(let index=0;index<Math.min(count[0],16);index++){
-    const child=[null], result=sdk.child(camera,index,child);
-    if(result){code||=result;continue;}
-    try{
-      const item={};const result=sdk.volume(child[0],item);
-      if(result){code||=result;continue;}
-      const label=typeof item.label==='string'?item.label:Buffer.from(item.label||[]).toString('utf8');
-      volumes.push({...item,label:label.replace(/\0.*$/s,''),capacity:Number(item.capacity),free:Number(item.free)});
-    }finally{sdk.release(child[0]);}
-  }
-  return {volumes,code};
+  // VolumeInfo's native layout is still unverified in NATIVE_ABI_MATRIX.md.
+  // H1 must not call the optional FFI binding with a guessed struct layout.
+  return {volumes:[],code:0,unverifiedLayout:'EdsGetVolumeInfo'};
 }
 async function diagnoseCamera(){
   ensure();
@@ -195,7 +269,18 @@ async function diagnoseCamera(){
     lens:state.equipment.lensName,mode:state.mode,availableShots:state.equipment.availableShots,sdkVersion,sdkPath:file,working:state.working,
     saveTo:state.saveTo,storage:storage.volumes,optional:sdk.exports,rows};
 }
+function registerWorkingEvents(){
+  if(sessionEventsRegistered)return;
+  // Mark before the first registration so partial failure still unregisters on close.
+  sessionEventsRegistered=true;
+  check(sdk.objectHandler(camera,0x200,callbacks[0],null),'События снимков');
+  check(sdk.propertyHandler(camera,0x100,callbacks[1],null),'События параметров');
+  check(sdk.stateHandler(camera,0x300,callbacks[2],null),'События камеры');
+  state.eventsRegistered=true;
+}
 function prepareWorkingSession(preferred){
+  state.controlsOnly=false;state.evfState=null;state.observedSaveTo=null;
+  registerWorkingEvents();
   const existing=get(0xb);
   state.saveTo=null;
   if(!restricted){
@@ -215,12 +300,23 @@ function prepareWorkingSession(preferred){
     reason:restricted?'Для этой модели доступен импорт.':!state.saveTo?'Камера не подтвердила сохранение на ПК. Повторите подключение.':null};
   return refresh();
 }
-async function connect({sdkDir,folder,cameraId,readOnly=false,savePreference,reconfigure=false}) {
+function prepareControlSession(){
+  if(sessionEventsRegistered||state.working&&!state.controlsOnly)throw Error('Отключите рабочую камеру перед подключением без передачи файлов.');
+  const output=get(0x500),mode=get(0x501);
+  state.working=true;state.controlsOnly=true;state.saveTo=null;state.eventsRegistered=false;
+  state.evfState={output,mode};
+  state.capabilities={...modelCapabilities(state.model,output!==null&&mode!==null),capture:false,import:false};
+  return refresh();
+}
+async function connect({sdkDir,folder,cameraId,readOnly=false,controlsOnly=false,savePreference,reconfigure=false,route}) {
+  if(typeof controlsOnly!=='boolean'||readOnly&&controlsOnly)throw Error('Некорректный режим подключения.');
   if(camera&&(!cameraId||cameraId===state.cameraId)){
-    destination=folder;
+    if(!readOnly&&state.working&&!!state.controlsOnly!==controlsOnly)throw Error('Отключите камеру перед сменой режима подключения.');
+    destination=folder;setDeliveryRoute({route,folder});
+    if(controlsOnly)return prepareControlSession();
     return !readOnly&&(!state.working||reconfigure||!state.saveTo&&!restricted) ? prepareWorkingSession(savePreference) : refresh();
   }
-  if(camera){if(captureWait||controls.isBusy())throw Error('Дождитесь завершения текущей команды камеры.');disconnect();}
+  if(camera){if(captureWait||controls.isBusy())throw Error('Дождитесь завершения текущей команды камеры.');await transferProducer.drain();disconnect();if(teardownUncertain)throw operationError('OPERATION_UNKNOWN_TERMINATION','Native session close is unverified.');}
   load(sdkDir);destination=folder;
   const items=listCameras({sdkDir});state.cameras=items;const selected=selectCamera(items,cameraId);
   if(!selected){state.error='Камера не найдена. Подключите USB и включите камеру. Для EOS 2000D выключите Wi-Fi в меню камеры.';return status();}
@@ -232,72 +328,96 @@ async function connect({sdkDir,folder,cameraId,readOnly=false,savePreference,rec
       const c=[null];check(sdk.child(list,index,c),'Выбор камеры');
       let keep=false;
       try{const candidate={};check(sdk.info(c[0],candidate),'Информация камеры');if(describeCamera(candidate,index).id===selected.id){camera=c[0];keep=true;break;}}
-      finally{if(!keep)sdk.release(c[0]);}
+      finally{if(!keep)releaseRef(c[0],'camera-selection-release');}
     }
     if(!camera)throw Error('Список камер изменился. Повторите поиск.');
-    check(sdk.open(camera),'Открытие камеры');sessionOpened=true;sessionEpoch++;evidence={};
-    check(sdk.objectHandler(camera,0x200,callbacks[0],null),'События снимков');
-    check(sdk.propertyHandler(camera,0x100,callbacks[1],null),'События параметров');
-    check(sdk.stateHandler(camera,0x300,callbacks[2],null),'События камеры');
+    openCameraSession();sessionEpoch++;evidence={};setDeliveryRoute({route,folder});
     state.description=selected.model;state.model=textProperty(0x2)||selected.model;state.connectedAt=Date.now();state.cameraId=selected.id;state.connected=true;state.error=null;
     restricted=!modelCapabilities(selected.model,true).capture;
-    state.working=false;state.saveTo=null;
+    state.working=false;state.controlsOnly=false;state.evfState=null;state.observedSaveTo=null;state.saveTo=null;state.eventsRegistered=false;
     state.capabilities={capture:false,liveView:false,focus:false,manualFocus:false,import:false,reason:'Открыта сессия диагностики.'};
-    log('success',`${state.model}: USB-подключение установлено.`);return readOnly?refresh():prepareWorkingSession(savePreference);
-  } catch(e) {disconnect();state.error=e.message;status();throw e;}
-  finally {if(list) sdk.release(list);}
+    log('success',`${state.model}: USB-подключение установлено.`);if(controlsOnly)return prepareControlSession();return readOnly?refresh():prepareWorkingSession(savePreference);
+  } catch(e) {await transferProducer.drain();disconnect();state.error=e.message;status();throw e;}
+  finally {if(list) releaseRef(list,'camera-list-release');}
 }
-function clearCard() {for(const ref of cardRefs.values()) sdk.release(ref);cardRefs.clear();}
-function failCapture(error){if(!captureWait)return;const waiting=captureWait;captureWait=null;try{waiting.latch?.release();}catch{}clearTimeout(waiting.timeout);clearTimeout(waiting.settle);waiting.reject(error);}
+function clearCard() {for(const [id,ref] of cardRefs){if(releaseRef(ref,'card-release'))cardRefs.delete(id);}}
+function failCapture(error){if(!captureWait)return;const waiting=captureWait;captureWait=null;try{waiting.latch?.release();}catch{waiting.releaseUnknown=true;}clearTimeout(waiting.timeout);clearTimeout(waiting.settle);if(waiting.releaseUnknown)error=operationError('OPERATION_UNKNOWN_TERMINATION','Shutter release could not be acknowledged.');transfers.settleCapture(waiting.operationId,{outcome:error?.code==='OPERATION_UNKNOWN_TERMINATION'?'UNKNOWN_TERMINATION':'FAILED'});waiting.reject(error);}
 function settleCapture(){
   const waiting=captureWait;if(!waiting||waiting.latch?.isHolding())return;
-  clearTimeout(waiting.settle);if(!waiting.files.length)return;
-  waiting.settle=setTimeout(()=>{if(captureWait!==waiting)return;captureWait=null;clearTimeout(waiting.timeout);waiting.resolve({files:waiting.files,shots:waiting.shots.size});},waiting.quietMs);
+  if(waiting.releaseUnknown){failCapture(operationError('OPERATION_UNKNOWN_TERMINATION','Shutter release could not be acknowledged.'));return;}
+  clearTimeout(waiting.settle);if(!waiting.observedTransfers)return;
+  waiting.settle=setTimeout(()=>{if(captureWait!==waiting)return;captureWait=null;clearTimeout(waiting.timeout);transfers.settleCapture(waiting.operationId,{outcome:'OBSERVATION_WINDOW_DRAINED'});waiting.resolve({files:[],shots:0,observedTransfers:waiting.observedTransfers,confirmation:'UNVERIFIED',nativeQuiescence:'UNKNOWN',operationId:waiting.operationId});},waiting.quietMs);
 }
 
 function disconnect() {
+  if(teardownUncertain)return status();
   sessionEpoch++;
   failCapture(Error('Съёмка прервана: камера отключена.'));
   if(camera) {
     try {restoreLiveView();}catch{}
+    if(teardownUncertain)return status();
     releaseEvf();clearCard();
     if(sessionOpened){
-      for(const [method,event] of [['objectHandler',0x200],['propertyHandler',0x100],['stateHandler',0x300]])try{sdk[method](camera,event,null,null);}catch{}
-      try{sdk.close(camera);}catch{}
+      if(sessionEventsRegistered)for(const [method,event] of [['objectHandler',0x200],['propertyHandler',0x100],['stateHandler',0x300]])try{if(observed({objectHandler:'EdsSetObjectEventHandler',propertyHandler:'EdsSetPropertyEventHandler',stateHandler:'EdsSetCameraStateEventHandler'}[method],'handlers',()=>sdk[method](camera,event,null,null))!==0)teardownUncertain=true;}catch{teardownUncertain=true;}
+      try{if(observed('EdsCloseSession','session-close',()=>sdk.close(camera))!==0)teardownUncertain=true;}catch{teardownUncertain=true;}
     }
-    sdk.release(camera);camera=null;
+    // Unknown close/unregister results do not justify shortening native lifetime.
+    if(!teardownUncertain){if(releaseRef(camera,'camera-release'))camera=null;}
   }
-  sessionOpened=false;restricted=false;evidence={};focusSampleAt=0;focusSample={sequence:focusSample.sequence,status:'unknown'};
-  live=false;Object.assign(state,{focusInfo:null,lastFocused:null,autofocus:null,connected:false,working:false,properties:{},liveStats:null,saveTo:null,capabilities:null,description:null,model:null,battery:null,equipment:null,cameraId:null,error:null});return status();
+  sessionOpened=false;sessionEventsRegistered=false;state.eventsRegistered=false;restricted=false;evidence={};focusSampleAt=0;focusSample={sequence:focusSample.sequence,status:'unknown'};
+  transfers.setRoute({sessionEpoch,sessionId:null,destination:''});
+  live=false;Object.assign(state,{focusInfo:null,lastFocused:null,autofocus:null,connected:false,working:false,controlsOnly:false,evfState:null,observedSaveTo:null,properties:{},liveStats:null,saveTo:null,capabilities:null,description:null,model:null,battery:null,equipment:null,cameraId:null,error:null,nativeOutcome:teardownUncertain?'UNKNOWN':null});return status();
 }
 function ensure() {if(!camera||!state.connected) throw Error('Сначала подключите камеру по USB.');}
 function ensureWorking(){ensure();if(!state.working)throw Error('Сначала настройте рабочее подключение камеры.');}
-function releaseEvf(){if(evfImage){sdk.release(evfImage);evfImage=null;}if(evfStream){sdk.release(evfStream);evfStream=null;}}
+function releaseEvf(){if(evfImage&&releaseRef(evfImage,'evf-image-release'))evfImage=null;if(evfStream&&releaseRef(evfStream,'evf-stream-release'))evfStream=null;}
 function restoreLiveView(){
   if(!evfRestore)return;
-  const {output,mode}=evfRestore;evfRestore=null;
-  try{set(0x500,output);}finally{if(mode===0)set(0x501,mode);}
+  const {output,mode}=evfRestore;
+  try{
+    if(!Number.isInteger(output)||!Number.isInteger(mode))throw Error('Исходные настройки Live View неизвестны.');
+    set(0x500,output);set(0x501,mode);
+    if(get(0x500)!==output||get(0x501)!==mode)throw Error('Камера не подтвердила восстановление Live View.');
+    evfRestore=null;
+    if(state.controlsOnly)state.evfState={output,mode};
+  }catch(error){
+    teardownUncertain=true;
+    observations.failure({operation:currentOperation?.method||'live',phase:'evf-restore',method:'EdsSetPropertyData',error});
+    send({event:'nativeObservation',data:{method:'EdsSetPropertyData',phase:'evf-restore',classification:'UNKNOWN'}});
+    throw operationError('OPERATION_UNKNOWN_TERMINATION','Live View restoration is unverified.');
+  }
 }
 function liveView({enabled}) {
   ensureWorking();
   if(enabled&&state.capabilities?.liveView===false)throw Error('Live View недоступен в текущем режиме камеры.');
   if(captureWait||controls.isBusy())throw Error('Дождитесь завершения текущей команды камеры.');
-  if(!!enabled===live)return status();
+  if(!!enabled===live)return state.controlsOnly&&!enabled&&!evfRestore?refresh():status();
   if(enabled){
     const output=get(0x500),mode=get(0x501);
-    if(output===null)throw Error('Камера не предоставила настройки Live View.');
+    if(output===null||mode===null)throw Error('Камера не предоставила исходные настройки Live View.');
     evfRestore={output,mode};
-    try{if(mode===0)set(0x501,1);set(0x500,output|2);}
-    catch(error){try{restoreLiveView();}catch{}throw error;}
+    try{
+      if(mode===0)set(0x501,1);set(0x500,output|2);
+      if(state.controlsOnly){
+        const actualOutput=get(0x500),actualMode=get(0x501);
+        if(actualOutput!==(output|2)||actualMode!==(mode===0?1:mode))throw Error('Камера не подтвердила включение Live View.');
+        state.evfState={output:actualOutput,mode:actualMode};
+      }
+    }
+    catch(error){try{restoreLiveView();}catch(restoreError){restoreError.cause=error;throw restoreError;}throw error;}
     live=true;state.error=null;
   }else{
     try{restoreLiveView();}
     finally{live=false;releaseEvf();state.liveStats=null;status();}
   }
   statsAt=performance.now();statsFrames=0;statsBytes=0;
-  return status();
+  // Live View can change the camera's reported AF/metering state. Publish a
+  // fresh read-only snapshot after restoration instead of reusing EVF-era data.
+  return state.controlsOnly&&!enabled?refresh():status();
 }
 function readFocus(){
+  // This restricted connection has no qualified FocusInfo point-layout decoder.
+  if(state.controlsOnly)return;
   if(Date.now()-focusSampleAt<125)return;
   focusSampleAt=Date.now();
   for(const ref of [evfImage,camera]){
@@ -318,16 +438,30 @@ function frame(publish=true) {
   try {
     if(!evfStream){const s=[null];check(sdk.stream(2*1024*1024,s),'Live View');evfStream=s[0];const im=[null];check(sdk.evfRef(evfStream,im),'Live View');evfImage=im[0];}
     check(sdk.seek(evfStream,0,0),'Live View');
-    const code=sdk.evf(camera,evfImage);if(code===0xa102||code===0x81)return false;
+    const code=sdk.evf(camera,evfImage);
+    if(!Number.isInteger(code)||code<0||code>0xffffffff)throw Error('Некорректный результат Live View.');
+    if(code===0xa102||code===0x81&&!state.controlsOnly)return false;
     check(code,'Live View');readFocus();const p=[null],position=[0],length=[0];check(sdk.pointer(evfStream,p),'Live View');check(sdk.position(evfStream,position),'Live View');
-    let size=Number(position[0]);if(!size){check(sdk.length(evfStream,length),'Live View');size=Number(length[0]);}
+    check(sdk.length(evfStream,length),'Live View');
+    const available=Number(length[0]),positionSize=Number(position[0]),size=positionSize||available;
+    if(!Number.isSafeInteger(available)||available<1||available>=20*1024*1024||!Number.isSafeInteger(positionSize)||positionSize<0||positionSize>available)throw Error('Некорректные границы буфера Live View.');
     let bytes=null;
     if(size>0&&size<20*1024*1024){bytes=copyNativeBuffer(p[0],size);evidence.evf=true;if(publish){send({event:'frame',data:bytes,sequence:++totalFrames,at:Date.now()});statsFrames++;statsBytes+=size;}}
     const now=performance.now();if(now-statsAt>=1000){state.liveStats={fps:Number((statsFrames*1000/(now-statsAt)).toFixed(1)),bytesPerSecond:Math.round(statsBytes*1000/(now-statsAt)),frames:totalFrames};statsAt=now;statsFrames=0;statsBytes=0;status();}
     return publish?true:bytes;
-  } catch(e) {if(publish)try{restoreLiveView();}catch{}live=false;releaseEvf();state.error=e.message;status();log('error',e.message);return false;}
+  } catch(e) {
+    if(publish)try{restoreLiveView();}catch{}
+    live=false;
+    if(state.controlsOnly&&(!Number.isInteger(e.code)||e.code<0||e.code>0xffffffff)){
+      teardownUncertain=true;
+      observations.failure({operation:'live',phase:'evf-frame',method:'EVF frame',error:e});
+      send({event:'nativeObservation',data:{method:'EVF frame',phase:'evf-frame',classification:'UNKNOWN'}});
+    }
+    releaseEvf();state.error=e.message;status();log('error',e.message);return false;
+  }
 }
 async function previewFocus(drive,nativeFocus){
+  if(state.controlsOnly)throw Error('Для управления фокусом включите Live View явно.');
   ensure();if(state.capabilities?.liveView===false)throw Error('Превью недоступно для этой камеры.');
   const output=get(0x500),mode=get(0x501);if(output===null||mode===null)throw Error('Камера не предоставила Live View.');
   const wasLive=live;let bytes=null;
@@ -346,7 +480,7 @@ async function previewFocus(drive,nativeFocus){
     try{if(camera){set(0x500,output);if(get(0x501)!==mode)set(0x501,mode);}}finally{live=wasLive;if(!wasLive){releaseEvf();state.liveStats=null;}status();}
   }
 }
-function download(ref,folder,isCapture=false) {
+function download(ref,folder,isCapture=false,context) {
   if(!folder) throw Error('Не выбрана папка съёмки.');let stream=null,complete=false,target;
   try {
     const info={};check(sdk.dir(ref,info),'Информация файла');
@@ -358,48 +492,65 @@ function download(ref,folder,isCapture=false) {
     const bytes=copyNativeBuffer(ptr[0],Number(length[0]));
     while(true) {target=path.join(folder,`${stem}${i?'_'+i:''}${ext}`);try {fs.writeFileSync(target,bytes,{flag:'wx'});break;}catch(e){if(e.code!=='EEXIST')throw e;i++;}}
     if(isCapture)evidence.capture=true;
-    send({event:'photo',data:{path:target,capture:isCapture}});log('success',`Сохранено: ${path.basename(target)}`);
-    if(isCapture&&captureWait){captureWait.files.push(target);captureWait.shots.add(path.basename(name,path.extname(name)).toLowerCase());send({event:'burstProgress',data:{shots:captureWait.shots.size}});settleCapture();}
+    send({event:'photo',photoSequence:++photoSequence,data:{path:target,capture:isCapture,context:{...context,phase:'ORIGINAL_COMMITTED'}}});log('success',`Сохранено: ${path.basename(target)}`);
+    if(isCapture&&captureWait){captureWait.observedTransfers++;send({event:'burstProgress',data:{shots:0,observedTransfers:captureWait.observedTransfers,confirmation:'UNVERIFIED'}});settleCapture();}
     return {path:target};
-  } finally {if(!complete) sdk.cancel(ref);if(stream)sdk.release(stream);}
+  } finally {if(!complete) sdk.cancel(ref);if(stream)releaseRef(stream,'download-stream-release');}
 }
-function capture({autofocus=true,folder,burstMs=0}){
+function capture({autofocus=true,folder,burstMs=0,route,captureId},operation){
   ensureWorking();if(state.capabilities?.capture===false)throw Error(state.capabilities.reason||'Съёмка недоступна.');if(captureWait||controls.isBusy())throw Error('Предыдущая команда камеры ещё выполняется.');destination=folder||destination;
   if(burstMs&&(![1,4,5].includes(get(0x401))||burstMs<100||burstMs>5000))throw Error('Выберите доступный серийный режим камеры. Максимальное удержание — 5 секунд.');
+  setDeliveryRoute({route,folder});transfers.noteCapture({operationId:operation.operationId,captureId,sessionEpoch});
   return new Promise((resolve,reject)=>{
-    const driveMode=get(0x401);captureWait={resolve,reject,files:[],shots:new Set(),quietMs:quietPeriod(driveMode,get(0x406)),timeout:setTimeout(()=>failCapture(Error('Камера не завершила передачу кадров за отведённое время. Проверьте режим, карту и фокус.')),driveMode===7?900000:75000)};
+    const driveMode=get(0x401);captureWait={resolve,reject,operationId:operation.operationId,observedTransfers:0,quietMs:quietPeriod(driveMode,get(0x406)),timeout:setTimeout(()=>failCapture(operationError('OPERATION_UNKNOWN_TERMINATION','Native capture completion is unverified after the producer deadline.')),driveMode===7?900000:75000)};
+    let failure;const waiting=captureWait;
+    const release=()=>{try{if(!camera||observed('EdsSendCommand','release',()=>sdk.command(camera,4,0))!==0)throw operationError('OPERATION_UNKNOWN_TERMINATION','Shutter release could not be acknowledged.');}catch{waiting.releaseUnknown=true;throw operationError('OPERATION_UNKNOWN_TERMINATION','Shutter release could not be acknowledged.');}};
     try{
-      if(burstMs){const waiting=captureWait;waiting.latch=holdShutter({press:()=>check(sdk.command(camera,4,autofocus?3:0x10003),'Серийный спуск'),release:()=>{if(camera)check(sdk.command(camera,4,0),'Освобождение спуска');},onReleased:()=>{send({event:'burstReleased'});if(captureWait===waiting)settleCapture();},onError:failCapture},burstMs);}
-      else{const code=sdk.command(camera,4,autofocus?3:0x10003);check(isUnsupportedCommand(code)?sdk.command(camera,0,0):code,'Спуск затвора');}
-    }catch(error){failCapture(error);}finally{if(!burstMs&&camera)sdk.command(camera,4,0);}
+      if(burstMs){waiting.latch=holdShutter({press:()=>check(observed('EdsSendCommand','capture',()=>sdk.command(camera,4,autofocus?3:0x10003)),'Серийный спуск'),release,onReleased:()=>{send({event:'burstReleased'});if(captureWait===waiting)settleCapture();},onError:failCapture},burstMs);}
+      else{const code=observed('EdsSendCommand','capture',()=>sdk.command(camera,4,autofocus?3:0x10003));check(isUnsupportedCommand(code)?observed('EdsSendCommand','capture',()=>sdk.command(camera,0,0)):code,'Спуск затвора');}
+    }catch(error){observations.failure({operation:'capture',operationId:operation.operationId,method:'EdsSendCommand',phase:'capture',error});failure=error;}
+    finally{if(!burstMs)try{release();}catch(error){failure||=error;}}
+    if(failure)failCapture(failure);
   });
 }
-function stopBurst(){if(captureWait?.latch)captureWait.latch.release();return {released:true};}
+function stopBurst(){try{if(captureWait?.latch)captureWait.latch.release();}catch(error){failCapture(error);throw error;}return {released:true};}
 
 async function listCard() {
-  ensure();if(captureWait)throw Error('Дождитесь окончания съёмки.');clearCard();const items=[];let seen=0;
+  ensure();if(state.controlsOnly)throw operationError('OPERATION_ADMISSION_CLOSED','Передача файлов отключена для этого подключения.');if(captureWait)throw Error('Дождитесь окончания съёмки.');clearCard();const items=[];let seen=0;
   const walk=(ref,depth)=>{
     if(depth>8||seen>10000)return;const count=[0];check(sdk.count(ref,count),'Чтение карты памяти');
     for(let i=0;i<count[0];i++) {const out=[null];check(sdk.child(ref,i,out),'Файл камеры');const child=out[0];let keep=false;seen++;
       try {const info={};const code=sdk.dir(child,info);if(depth===0||(!code&&info.folder)){walk(child,depth+1);} else if(!code) {
         const name=(typeof info.name==='string'?info.name:Buffer.from(info.name).toString()).replace(/\0.*$/,'');
         if(/\.(jpe?g|cr2|cr3)$/i.test(name)){const id=String(items.length);items.push({id,name,size:Number(info.size)});cardRefs.set(id,child);keep=true;}
-      }}finally {if(!keep)sdk.release(child);}
+      }}finally {if(!keep)releaseRef(child,'card-item-release');}
     }
   };try{walk(camera,0);evidence.card=true;return items;}catch(error){clearCard();throw error;}
 }
 const controls=createCameraControl({
-  ensure:ensureWorking,refresh,get,set,log,previewFocus,pollFocus:readFocus,focusState:()=>focusSample,onAutofocus:result=>{if(result.status==='focused')evidence.autofocus=true;state.autofocus={...result,at:Date.now()};if(result.status==='focusing')state.lastFocused=null;status();},canFocus:()=>get(0x404)!==3,isCapturing:()=>!!captureWait,isLive:()=>live,
-  command:(id,param,action)=>{ensure();check(sdk.command(camera,id,param),action);}
+  ensure:ensureWorking,refresh,get,set,log,previewFocus,pollFocus:readFocus,focusState:()=>focusSample,requiresLiveFocus:()=>!!state.controlsOnly,focusConfirmationAvailable:()=>!state.controlsOnly,onAutofocus:result=>{if(result.status==='focused')evidence.autofocus=true;state.autofocus={...result,at:Date.now()};if(result.status==='focusing')state.lastFocused=null;status();},canFocus:()=>state.controlsOnly?state.capabilities?.focus!==false&&get(0x416)===1&&[0,1,2].includes(get(0x404)):get(0x404)!==3,isCapturing:()=>!!captureWait,isLive:()=>live,
+  command:(id,param,action)=>{
+    ensure();
+    if(state.controlsOnly){
+      const owedStop=id===0x102&&param===0&&controlAfStopPending;
+      if(!owedStop&&(!live||![0x102,0x103].includes(id)||id===0x102&&param!==1))throw Error('В этом подключении разрешён только фокус при включённом Live View.');
+      if(!owedStop){const output=get(0x500),mode=get(0x501);if(output===null||!(output&2)||mode===null||mode===0)throw Error('Камера не подтвердила Live View для фокуса.');}
+      if(id===0x102)controlAfStopPending=param===1;
+    }
+    check(state.controlsOnly?observed('EdsSendCommand','controls-only-focus',()=>sdk.command(camera,id,param)):sdk.command(camera,id,param),action);
+  }
 });
 const handlers={
-  connect,disconnect,listCameras,sdkEnvironment,diagnoseCamera,destination:({folder})=>{if(captureWait||controls.isBusy())throw Error('Камера занята.');destination=folder;return true;},status:()=>refresh(),live:liveView,capture,burstStop:stopBurst,
+  connect,disconnect:async()=>{await transferProducer.drain();const result=disconnect();if(teardownUncertain)throw operationError('OPERATION_UNKNOWN_TERMINATION','Native session close is unverified.');return result;},listCameras,sdkEnvironment,diagnoseCamera,destination:async({folder,route})=>{if(state.controlsOnly)throw operationError('OPERATION_ADMISSION_CLOSED','Передача файлов отключена для этого подключения.');if(captureWait||controls.isBusy())throw Error('Камера занята.');await transferProducer.drain();destination=folder;setDeliveryRoute({route,folder});return true;},status:()=>producersFenced||teardownUncertain?status():refresh(),live:liveView,capture,burstStop:stopBurst,
   property:controls.property,focus:async args=>{const result=await controls.focus(args);evidence.driveLens=true;return result;},autofocus:controls.autofocus,
   listCard,
-  importCard:async({ids,folder})=>{ensure();const files=[];for(const id of ids){const ref=cardRefs.get(id);if(!ref)throw Error('Список файлов устарел.');files.push(download(ref,folder));await new Promise(r=>setImmediate(r));}return files;},
-  shutdown:async()=>{shuttingDown=true;disconnect();await new Promise(resolve=>setImmediate(resolve));releaseSdk();com?.();send({event:'shutdown'});setTimeout(()=>process.exit(0),20);return true;}
+  importCard:async({ids,folder,route},operation)=>{ensure();if(state.controlsOnly)throw operationError('OPERATION_ADMISSION_CLOSED','Передача файлов отключена для этого подключения.');const files=[],context=Object.freeze({sessionEpoch,sessionId:route?.sessionId??null,destination:folder,operationId:operation.operationId,captureId:null,operationType:'CARD_IMPORT',attribution:'EXPLICIT_IMPORT',correlation:'CONFIRMED'});for(const id of ids){operation.cancellation.throwIfRequested();const ref=cardRefs.get(id);if(!ref)throw Error('Список файлов устарел.');files.push(download(ref,folder,false,{...context,transferId:randomUUID()}));await new Promise(r=>setImmediate(r));}operation.cancellation.throwIfRequested();return files;},
+  producerFence:async()=>{operations.stopAdmission();await operations.whenIdle({exclusiveOnly:true});await transferProducer.drain();clearTimeout(timer);transferProducer.fence();producersFenced=true;return {drained:true,lastPhotoSequence:photoSequence,nativeStarted,proof:nativeStarted?'unknown':'native-not-started',transfers:transferProducer.snapshot()};},
+  finalizeShutdown:async()=>{if(!producersFenced)throw operationError('OPERATION_ADMISSION_CLOSED','A producer fence is required before teardown.');shuttingDown=true;await transferProducer.drain();disconnect();await new Promise(resolve=>setImmediate(resolve));const released=releaseSdk();if(released&&com)observed('CoUninitialize','com-uninitialize',()=>com(),'void');send({event:'shutdown'});setTimeout(()=>process.exit(teardownUncertain?1:0),20);return {closed:true,lastPhotoSequence:photoSequence,nativeStarted,proof:nativeStarted?'unknown':'native-not-started',observations:observations.snapshot(),transfers:transferProducer.snapshot()};}
 };
-async function receive(message) {const {id,method,args}=message;try{if(shuttingDown)return;const handler=handlers[method];if(!handler)throw Error('Неизвестная команда.');const result=await handler(args||{});send({id,result});}catch(e){send({id,error:e.message});log('error',e.message);}}
+const operationHandlers=Object.fromEntries(Object.entries(handlers).map(([method,handler])=>[method,async(args,context)=>{const owned=!['status','burstStop','producerFence'].includes(method);if(owned)currentOperation={method,operationId:context.operationId};try{if(teardownUncertain&&!['status','burstStop','producerFence','finalizeShutdown'].includes(method))throw operationError('OPERATION_UNKNOWN_TERMINATION','Native teardown state is unverified.');return await handler(args,context);}finally{if(currentOperation?.operationId===context.operationId)currentOperation=null;}}]));
+const operations=createOperationHost({generation,handlers:operationHandlers,send,getSessionEpoch:()=>sessionEpoch});
+async function receive(message) {if(shuttingDown)return;if(message?.type==='emergencyRelease'&&message.generation===generation){try{stopBurst();}catch{send({event:'transferIssue',data:{code:'EMERGENCY_RELEASE_UNKNOWN'}});}return;}await operations.receive(message);}
 if(parent)parent.on('message',({data})=>receive(data));else process.on('message',receive);
-setInterval(()=>{if(camera)try{refresh();}catch(e){log('error',e.message);}},2500).unref();
+setInterval(()=>{if(camera&&!producersFenced&&!teardownUncertain)try{refresh();}catch(e){log('error',e.message);}},2500).unref();
 send({event:'ready'});

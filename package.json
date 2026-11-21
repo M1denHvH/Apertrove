@@ -10,7 +10,8 @@
     "build": "vite build",
     "start": "electron .",
     "package": "npm run build && electron-builder --win --dir",
-    "test": "node --test tests/*.test.cjs",
+    "test": "node --no-addons --max-old-space-size=192 --test tests/camera-control.test.cjs tests/camera-destinations.test.cjs tests/camera-discovery.test.cjs tests/capture-timing.test.cjs tests/equipment.test.cjs tests/focus-info.test.cjs tests/i18n.test.cjs tests/lighting-colors.test.cjs tests/native-focus.test.cjs tests/preset-series.test.cjs tests/remote-appearance.test.cjs tests/shutter-latch.test.cjs tests/workspace.test.cjs tests/native-production/live-histogram.cjs tests/native-production/h1-readonly.test.cjs",
+    "test:t1": "node --no-addons --max-old-space-size=192 tests/t1-runner.cjs --tier T1 --scope synthetic tests/t1/library-schema.test.cjs tests/t1/library-bootstrap.test.cjs tests/t1/boot-state.test.cjs tests/t1/isolation.test.cjs",
     "preflight": "node scripts/preflight.cjs",
     "source:zip": "node scripts/source-zip.cjs",
     "i18n:check": "node scripts/check-i18n.cjs",
@@ -27,7 +28,7 @@
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "sharp": "0.35.5",
-    "ws": "^8.22.0"
+    "ws": "^8.23.0"
   },
   "devDependencies": {
     "@babel/parser": "^7.29.0",
@@ -36,7 +37,7 @@
     "electron": "45.3.2",
     "electron-builder": "^26.0.12",
     "playwright": "^1.56.0",
-    "vite": "^6.1.0"
+    "vite": "^6.4.6"
   },
   "build": {
     "appId": "app.apertrove.desktop",
@@ -63,10 +64,20 @@
       "node_modules/sharp/**/*",
       "node_modules/@img/**/*",
       "electron/camera-worker.cjs",
+      "electron/operation-lifecycle.cjs",
+      "electron/transfer-context.cjs",
+      "electron/transfer-producer.cjs",
+      "electron/native-observations.cjs",
+      "electron/sdk-initialization.cjs",
       "electron/sdk-environment.cjs",
       "electron/camera-capabilities.cjs",
       "electron/shot-inspector-worker.cjs",
       "electron/library.cjs",
+      "electron/library-storage.cjs",
+      "electron/library-text.cjs",
+      "electron/library-recovery.cjs",
+      "electron/library-schema.cjs",
+      "electron/photo-name.cjs",
       "electron/metadata.cjs",
       "electron/camera-values.cjs",
       "electron/camera-control.cjs",

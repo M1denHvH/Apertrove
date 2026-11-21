@@ -127,7 +127,7 @@ export default function LightingStudio() {
     catch { setNotice(() => () => (t("lightingStudio.couldn_t_save_palettes_to_the_apertrove_profile"))); }
   }
   async function copy(hexValue) {
-    try { await navigator.clipboard.writeText(hexValue); setCopied(hexValue); setNotice(() => () => (t("lightingStudio.copied", { v0: hexValue }))); }
+    try { await window.focal.copyColor({text:hexValue}); setCopied(hexValue); setNotice(() => () => (t("lightingStudio.copied", { v0: hexValue }))); }
     catch { setNotice(() => () => (t("lightingStudio.couldn_t_copy_the_hex_code"))); }
   }
   return <div className="content-page lighting-studio">

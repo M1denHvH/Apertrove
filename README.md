@@ -17,6 +17,8 @@ Screenshots are from the packaged app with an isolated demo profile, sample artw
 
 ## What you can do
 
+The camera features below are implemented. Controlled EOS 2000D tests recorded camera reads, exposure write/readback/restore, Live View and the software histogram. AF/lens commands were accepted, while optical focus remains unconfirmed; capture and file transfer remain unqualified. [Current compatibility evidence](docs/HARDWARE_COMPATIBILITY.md)
+
 - **Frame and shoot from the computer.** Use Live View, composition guides, remote shutter release, and the exposure and focus controls available on your camera.
 - **Repeat a setup.** Save camera presets or queue them in an ordered series to shoot variants of the same setup.
 - **Keep each shoot together.** Give every session its own output folder. Import photos, browse the library, rate and filter frames, and inspect metadata.
@@ -29,10 +31,14 @@ Screenshots are from the packaged app with an isolated demo profile, sample artw
 
 1. From this repository’s **Releases** tab, download the Windows x64 ZIP attached to version **0.10.3**. Compare its SHA-256 with the accompanying checksum, then extract the entire ZIP.
 2. Open `Apertrove.exe` inside the extracted folder. It’s an unsigned portable build, so Windows may show a reputation prompt. The full folder is needed at runtime.
-3. You can create sessions, import photos, and use Lighting Studio straight away. For camera control, install official [EOS Utility](https://www.usa.canon.com/support/eos-utilities) for your model or obtain compatible x64 components through [Canon’s developer program](https://www.usa.canon.com/support/sdk). The first-run guide checks for them and lets you choose their folder.
-4. Close EOS Utility, connect the powered camera with a USB data cable, and use Apertrove’s **Find cameras** action. Create a session and choose where incoming photos should go.
+3. You can create sessions, import photos, and use Lighting Studio straight away. Camera control requires compatible x64 Canon EDSDK components installed separately from official Canon software or obtained through [Canon’s developer program](https://www.usa.canon.com/support/sdk). [EOS Utility](https://www.usa.canon.com/support/eos-utilities) and Picture Style Editor are potential sources; the included runtime and its architecture depend on the release. The first-run guide checks installed components and lets you choose their folder.
+4. Close EOS Utility, Picture Style Editor and other software using the camera, connect the powered camera with a USB data cable, and use Apertrove’s **Find cameras** action. Create a session and choose where incoming photos should go.
 
-The **Canon EOS 2000D over USB** is the model with recorded hands-on Apertrove tests. Other cameras may work with a compatible x64 EDSDK, and the controls you see depend on the camera, lens, and shooting mode. The package was verified on Windows 10 x64. Windows 11 x64 is a target, pending a separate clean-machine check. See [requirements](docs/REQUIREMENTS.md) and [troubleshooting](docs/TROUBLESHOOTING.md).
+On 21 November 2026, one separately installed Picture Style Editor x64 runtime, file version **3.18.40.0**, passed N2 initialize/terminate with both raw codes `0`. With a **Canon EOS 2000D connected over USB**, H1A counted **one camera** with five raw zero returns. After an earlier launcher-only failure, a separately authorized H1 attempt read firmware **1.3.0**, the Sigma 17–70mm lens, battery **80%**, and **M / ISO 400 / f/22 / 1/320 / Auto WB**. Initialize, session open/close and terminate each returned `0`; worker and Electron exited naturally with an empty supervised process tree.
+
+H2 recorded exposure restoration, **1056×704 Live View at about 27.5 FPS**, histogram ON/OFF, and a separately authorized AF/near/far command sequence with fresh state restoration. AF remained **unverified**. The first H2 run's stale post-stop comparison and the earlier H1 module-location result remain **UNKNOWN** in their original receipts. [H2 results and limits](docs/H2_VALIDATION.md)
+
+H3 capture/transfer and DATA-005 durability qualification remain open. That existing baseline issue does not automatically block a separately reviewed controls/read-only/UI merge; final scope, checks and user approval are still required. These results do not qualify other Canon models or PSE releases. The package was verified on Windows 10 x64; Windows 11 x64 awaits a clean-machine check. See [requirements](docs/REQUIREMENTS.md) and [troubleshooting](docs/TROUBLESHOOTING.md).
 
 ## Develop
 
