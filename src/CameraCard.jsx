@@ -35,7 +35,7 @@ export default function CameraCard({camera,disabled=false,onConnect,onNotice,api
     if(thumbnailRunning.current)return;
     thumbnailRunning.current=true;
     try{
-      while(thumbnailQueue.current.length&&alive.current&&!exportOwner.current&&!request.current&&current.current.camera.connected){
+      while(thumbnailQueue.current.length&&alive.current&&!exportOwner.current&&!request.current&&!current.current.disabled&&current.current.camera.connected){
         const {id,epoch}=thumbnailQueue.current.shift();
         if(epoch!==generation.current)continue;
         try{
@@ -51,7 +51,7 @@ export default function CameraCard({camera,disabled=false,onConnect,onNotice,api
   },[drainThumbnails]);
 
   const load=useCallback(async(parentId=null,{append=false,refresh=false}={})=>{
-    if(exportOwner.current||!current.current.camera.connected)return;
+    if(exportOwner.current||current.current.disabled||!current.current.camera.connected)return;
     if(request.current){pendingNavigation.current={parentId,append,refresh};return;}
     const epoch=++generation.current;request.current=true;setLoading(true);setError('');setPreview(null);
     thumbnailQueue.current=[];thumbnailSeen.current.clear();
@@ -80,6 +80,11 @@ export default function CameraCard({camera,disabled=false,onConnect,onNotice,api
     if(!connected&&exportOwner.current)void api.cardExportCancel({operationId:exportOwner.current.operationId}).catch(()=>{});
     if(canRead)void load();
   },[connected,camera.cameraId,camera.connectedAt,canRead,load]);
+  useEffect(()=>{
+    if(!disabled&&canRead&&!request.current&&!exportOwner.current){
+      if(!listing&&!error)void load();else void drainThumbnails();
+    }
+  },[disabled,canRead,listing,error,load,drainThumbnails]);
   useEffect(()=>api.on(({type,data})=>{
     if(type!=='cardExportProgress'||!exportOwner.current)return;
     const owner=exportOwner.current;if(owner.operationId&&data.operationId!==owner.operationId)return;
