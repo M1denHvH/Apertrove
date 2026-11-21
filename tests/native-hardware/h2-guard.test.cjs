@@ -38,3 +38,12 @@ test('H2 binding exception stops series but permits precisely one owed AF OFF wi
 test('H2 new tickets cannot repeat exposure or restoration for a property',()=>{
   const f=fixture();f.get(0x402);f.desc(0x402);f.phase('exposure',{write:{id:0x402,value:96}});f.write(0x402,96);f.phase('exposure',{write:{id:0x402,value:80}});assert.throws(()=>f.write(0x402,80),/one exposure\/restore attempt/);
 });
+test('H2 rejects a different SDK camera model before any property or Live View mutation',async()=>{
+  const calls=[],camera={connected:true,working:true,controlsOnly:true,model:'Different Canon camera',saveTo:null,eventsRegistered:false,capabilities:{capture:false}},files=new Map();
+  const fakeFs={existsSync:()=>false,writeFileSync:(file,value)=>files.set(file,value),renameSync:(from,to)=>{files.set(to,files.get(from));files.delete(from);},readFileSync:()=>''};
+  const sandbox={module:{exports:{}},require:name=>name==='node:fs'?fakeFs:require(name),setTimeout};
+  vm.runInNewContext(fs.readFileSync(path.join(__dirname,'h2-stages.cjs'),'utf8'),sandbox);
+  const result=await sandbox.module.exports.runStages({app:{},page:{evaluate:async(_fn,{method})=>{calls.push(method);if(method==='boot')return {camera};if(method==='cameraWorking')return camera;if(method==='disconnect')return {connected:false};throw Error('UNEXPECTED_MUTATION: '+method);}},output:path.resolve('synthetic'),nonce:'test',controlPath:path.resolve('synthetic/control.json'),record:()=>{}});
+  assert.match(result.error,/H2_EXACT_CAMERA_MODEL_REQUIRED/);assert.notEqual(result.completed,true);
+  assert.deepEqual(calls,['cameraWorking','boot','disconnect']);
+});

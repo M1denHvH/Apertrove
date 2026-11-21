@@ -14,6 +14,7 @@ async function runStages({app,page,output,nonce,controlPath,record}){
     control('snapshot');const connected=await call('cameraWorking',{controlsOnly:true});
     assert(connected.connected&&connected.working&&connected.controlsOnly&&connected.saveTo===null&&connected.capabilities.capture===false&&connected.eventsRegistered===false,'H2_CONTROLS_ONLY_INVARIANT');
     const initial=await state();result.initial=initial.camera;result.initialRaw=scalarSnapshot();
+    assert(initial.camera.model==='Canon EOS 2000D','H2_EXACT_CAMERA_MODEL_REQUIRED');
     // SaveTo and both EVF scalars must be freshly observed before any camera mutation.
     assert([0xb,0x500,0x501].every(id=>Number.isInteger(result.initialRaw[id])),'H2_FRESH_EVF_SAVETO_SNAPSHOT_REQUIRED');
     for(const [key,id]of [['iso',0x402],['shutter',0x406],['aperture',0x405]]){
