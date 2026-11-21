@@ -27,7 +27,7 @@ A greyed control can mean the feature is unsupported, unavailable in the current
 
 Development builds include **built-in flash pop-up** and **BULB start/end** controls for verified runtime and camera-capability combinations. Initial native support is limited to the verified x64 Canon runtime with Windows file version **3.18.40.0** and recognized camera capabilities. A matching version number alone is not a support guarantee; other or unrecognized combinations retain unavailable controls.
 
-Broader physical compatibility still needs hardware testing. Flash mode and firing settings do not establish mechanical pop-up; an accepted raise command alone does not prove the position of the flash. On the tested setup, use flash pop-up with **Live View off**. The Live View-on request currently returns an error and is under investigation. BULB requires an offered compatible route and the camera to be in BULB mode. Exposure time is shown only from camera messages, and an unknown stop is not treated as a completed exposure.
+Broader physical compatibility still needs hardware testing. Flash mode and firing settings do not establish mechanical pop-up; an accepted raise command alone does not prove the position of the flash. On the tested setup, flash pop-up has been confirmed with **Live View both off and on** in the current development build, without an automatic preview stop/restart. BULB requires an offered compatible route and the camera to be in BULB mode. Exposure time is shown only from camera messages, and an unknown stop is not treated as a completed exposure.
 
 ## Testing status
 
@@ -35,7 +35,7 @@ Earlier hardware observations cover a limited set of camera state reads, exposur
 
 - Single capture and a brief 120 ms continuous-drive hold were each checked with AI Servo off and on. Each of the four inputs delivered one file, without the hold watchdog firing.
 - One three-second BULB exposure reported camera elapsed time from 0 through 3 seconds, delivered a JPEG with EXIF ExposureTime of 3 seconds, and restored the previous shutter-speed setting.
-- The user confirmed that Apertrove's flash button physically raises the built-in flash with Live View off. With Live View on, the request returns an error; this scenario remains under investigation. The camera's own flash button also works with the Apertrove session open and Live View off.
+- The user confirmed that Apertrove physically raises the built-in flash with Live View both off and on in the current development build. The Live View-on check dispatched the request directly and left the preview running, without stopping or restarting it. The camera's own flash button also works with the Apertrove session open and Live View off.
 
 These are limited results for one setup, not certification of other bodies, firmware, modes or all exposure lengths. Automated fake-provider tests additionally cover application paths and errors; they do not establish physical behavior on another setup.
 
