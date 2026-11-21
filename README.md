@@ -17,7 +17,7 @@ Screenshots are from the packaged app with an isolated demo profile, sample artw
 
 ## What you can do
 
-The camera features below are implemented. Native lifecycle and camera-count checks passed, and one EOS 2000D read-only diagnostic cycle returned real camera data and closed cleanly. Its raw runner result remains UNKNOWN after a GPU-module location finding; Live View, focus and capture remain unqualified. [Current compatibility evidence](docs/HARDWARE_COMPATIBILITY.md)
+The camera features below are implemented. Controlled EOS 2000D tests recorded camera reads, exposure write/readback/restore, Live View and the software histogram. AF/lens commands were accepted, while optical focus remains unconfirmed; capture and file transfer remain unqualified. [Current compatibility evidence](docs/HARDWARE_COMPATIBILITY.md)
 
 - **Frame and shoot from the computer.** Use Live View, composition guides, remote shutter release, and the exposure and focus controls available on your camera.
 - **Repeat a setup.** Save camera presets or queue them in an ordered series to shoot variants of the same setup.
@@ -36,7 +36,9 @@ The camera features below are implemented. Native lifecycle and camera-count che
 
 On 21 November 2026, one separately installed Picture Style Editor x64 runtime, file version **3.18.40.0**, passed N2 initialize/terminate with both raw codes `0`. With a **Canon EOS 2000D connected over USB**, H1A counted **one camera** with five raw zero returns. After an earlier launcher-only failure, a separately authorized H1 attempt read firmware **1.3.0**, the Sigma 17–70mm lens, battery **80%**, and **M / ISO 400 / f/22 / 1/320 / Auto WB**. Initialize, session open/close and terminate each returned `0`; worker and Electron exited naturally with an empty supervised process tree.
 
-The H1 runner's original **UNKNOWN** is preserved: its strict location filter flagged five NVIDIA GPU DLLs under Windows DriverStore. Post-run signature checks were Valid for all five; this review does not relabel the raw result as PASS. H2/H3 remain untested and DATA-005 camera-transfer durability remains open; full capture integration is held. These observations do not qualify other Canon models or PSE releases. The package was verified on Windows 10 x64; Windows 11 x64 awaits a clean-machine check. See [compatibility evidence](docs/HARDWARE_COMPATIBILITY.md), [requirements](docs/REQUIREMENTS.md) and [troubleshooting](docs/TROUBLESHOOTING.md).
+H2 recorded exposure restoration, **1056×704 Live View at about 27.5 FPS**, histogram ON/OFF, and a separately authorized AF/near/far command sequence with fresh state restoration. AF remained **unverified**. The first H2 run's stale post-stop comparison and the earlier H1 module-location result remain **UNKNOWN** in their original receipts. [H2 results and limits](docs/H2_VALIDATION.md)
+
+H3 capture/transfer and DATA-005 durability qualification remain open. That existing baseline issue does not automatically block a separately reviewed controls/read-only/UI merge; final scope, checks and user approval are still required. These results do not qualify other Canon models or PSE releases. The package was verified on Windows 10 x64; Windows 11 x64 awaits a clean-machine check. See [requirements](docs/REQUIREMENTS.md) and [troubleshooting](docs/TROUBLESHOOTING.md).
 
 ## Develop
 

@@ -1,6 +1,6 @@
 # Предлагаемый первый review PR
 
-Current update (21 November 2026): see [hardware compatibility evidence](HARDWARE_COMPATIBILITY.md) for completed N2/H1A and actual H1 read-only observations, including the preserved raw UNKNOWN and separate GPU-module review. This document retains the historical integration plan. DATA-005 remains OPEN; full capture merge readiness is not established, and final merge requires the user's confirmation.
+Current update (21 November 2026): see [hardware compatibility evidence](HARDWARE_COMPATIBILITY.md) for completed N2/H1A and actual H1 read-only observations, including the preserved raw UNKNOWN and separate GPU-module review. This document retains the historical integration plan. [Actual H2 evidence](H2_VALIDATION.md) now records exposure/Live View and separately authorized AF/lens commands with focus unverified. DATA-005 remains an unchanged baseline capture/H3/release limitation; scoped controls/read-only/UI merge readiness awaits exact final checks, CI, review and user confirmation.
 
 **Title:** Protect library integrity and verify isolated Electron integration
 

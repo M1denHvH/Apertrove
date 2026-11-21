@@ -29,4 +29,4 @@ The retry's final raw UNKNOWN came from five NVIDIA GPU-process modules under Wi
 
 IC01 now checks its launcher SHA against actual Git HEAD and records/rechecks source hashes. Earlier H1/histogram reports with a mismatched launcher sourceCommit remain historical evidence, not final-HEAD certification. Synthetic tests do not qualify the physical camera or native callback lifetime.
 
-N2 is complete and should not be repeated merely for another PASS. H2/H3 remain NOT RUN and require separate operation-specific approvals. DATA-005 remains OPEN. Technical compatibility and applicable local-use conditions are separate questions; user confirmation is not evidence of a Canon license grant.
+N2 is complete and should not be repeated merely for another PASS. Separately authorized [H2 scopes](H2_VALIDATION.md) recorded exposure/Live View observations and an AF/lens continuation with focus unverified; H3 remains NOT RUN. DATA-005 remains OPEN for capture/release qualification and is not a new H2 regression. Technical compatibility and applicable local-use conditions are separate questions; user confirmation is not evidence of a Canon license grant.

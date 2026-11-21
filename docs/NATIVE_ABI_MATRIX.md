@@ -10,7 +10,7 @@
 | `EdsPropertyDesc` | Size 524, alignment 4, offsets 0/4/8/12; Reference/archives and compile probe agree | Actual H1: 22 descriptor calls returned 0; values remain camera/mode-dependent. |
 | `EdsAccess`, `EdsDataType` | 4-byte Windows enum representation justified | Not grounds for write permission or arbitrary property decoding. |
 | Function / callback convention | Windows x64 ABI and documented parameter shapes justified | Canon callback lifetime/quiescence unverified; H1 registers no Canon callbacks. |
-| `EdsVolumeInfo`, card/file structures, Capacity, FocusInfo | Outside targeted H1 qualification | No positive H2/H3 runtime result. VolumeInfo is not invoked by H1. |
+| `EdsVolumeInfo`, card/file structures, Capacity, FocusInfo | Outside targeted H1 qualification | Observed H2 controls/EVF do not qualify these other layouts; H3 is untested. VolumeInfo is not invoked by H1. |
 
 N2 completed SOURCE_ZERO_CYCLE and H1A counted one camera with five raw zero returns. A separately authorized H1 retry recorded camera reads and normal cleanup; its raw aggregate UNKNOWN was caused by five signed GPU-driver paths rejected by the module-location filter. The earlier pre-SDK launcher block remains historical evidence. [Actual identities, source commits and limits](HARDWARE_COMPATIBILITY.md).
 
