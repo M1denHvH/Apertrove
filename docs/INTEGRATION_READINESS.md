@@ -1,6 +1,6 @@
 # Integration Candidate readiness — S1 → S2C
 
-Current update (21 November 2026): see [hardware compatibility evidence](HARDWARE_COMPATIBILITY.md) for completed N2/H1A and the H1 launcher blocker. This document retains the historical integration plan. DATA-005 remains OPEN; full capture merge readiness is not established, and final merge requires the user's confirmation.
+Current update (21 November 2026): see [hardware compatibility evidence](HARDWARE_COMPATIBILITY.md) for completed N2/H1A and actual H1 read-only observations, including the preserved raw UNKNOWN and separate GPU-module review. This document retains the historical integration plan. DATA-005 remains OPEN; full capture merge readiness is not established, and final merge requires the user's confirmation.
 
 **Обновление IC01, 2026-11-19:** исходный план ниже сохранён как история S2C. Задание IC01 отдельно разрешило и обеспечило official Electron45.3.2 с fail-closed unpackaged fake provider. Actual main/preload/renderer/utilityProcess smoke и текущая классификация gates описаны в `docs/INTEGRATION_CANDIDATE_01.md`; exact final HEAD/commands/exits определяют ignored `qa/integration-candidate/execution-ledger.json`, `smoke-results.json` и `final-verification.json`. Историческое «real Electron не выполнен» ниже относится к S2C, а не к этому новому контуру. Combined lifecycle merge gate закрывается только согласованным final PASS этих receipts и независимым review на том же source; package/vendor/hardware release gates и SEC-004 main CSP остаются открытыми.
 

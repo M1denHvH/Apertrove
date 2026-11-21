@@ -1,6 +1,6 @@
 # Предлагаемый первый review PR
 
-Current update (21 November 2026): see [hardware compatibility evidence](HARDWARE_COMPATIBILITY.md) for completed N2/H1A and the H1 launcher blocker. This document retains the historical integration plan. DATA-005 remains OPEN; full capture merge readiness is not established, and final merge requires the user's confirmation.
+Current update (21 November 2026): see [hardware compatibility evidence](HARDWARE_COMPATIBILITY.md) for completed N2/H1A and actual H1 read-only observations, including the preserved raw UNKNOWN and separate GPU-module review. This document retains the historical integration plan. DATA-005 remains OPEN; full capture merge readiness is not established, and final merge requires the user's confirmation.
 
 **Title:** Protect library integrity and verify isolated Electron integration
 

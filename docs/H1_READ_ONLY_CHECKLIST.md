@@ -1,8 +1,8 @@
 # EOS 2000D H1 read-only checklist
 
-**Current result: BLOCKED before SDK execution.** N2 completed and H1A counted one camera. The [targeted ABI qualification](HARDWARE_ABI_QUALIFICATION.md), including its compile-only probe, justifies the limited H1 declarations. The attempted Electron launcher stopped before Job assignment/admission; no firmware, lens, battery or property data was read. See [hardware evidence](HARDWARE_COMPATIBILITY.md).
+**Current raw result: UNKNOWN, with real H1 reads and normal cleanup recorded.** After the first pre-SDK launcher block, a separately authorized retry read EOS 2000D firmware 1.3.0, lens, battery, current properties and descriptors. The final runner finding was five GPU-driver module locations; separate signature review and raw UNKNOWN are retained independently. See [hardware evidence](HARDWARE_COMPATIBILITY.md).
 
-This checklist does not authorize another attempt. Correct the concrete launcher failure without Canon loading, verify the correction safely and obtain renewed user approval before repeating real H1.
+This checklist does not authorize another attempt. Review the preserved H1 evidence and module finding; obtain a new operation-specific approval before any further native stage. Do not rerun a completed lifecycle or read-only attempt merely to obtain PASS.
 
 ## Current source path
 
@@ -10,7 +10,7 @@ This checklist does not authorize another attempt. Correct the concrete launcher
 
 The route uses justified DeviceInfo/PropertyDesc layouts and bounded property buffers. It does not call working-session setup, property writes, SaveTo, Capacity, EVF, focus, shutter or card import. Volume access is **NOT QUERIED** because `EdsVolumeInfo` remains ABI-unqualified. Unsupported properties are recorded; native exceptions, invalid returns, unsafe outputs and uncertain cleanup stop the stage.
 
-## Separately authorized retry
+## Protocol for any separately authorized future attempt
 
 1. Pin source, built renderer, Electron, addon and Canon runtime bytes. Require fresh ready:true, blockers:[] and empty NODE_OPTIONS/NODE_PATH; never reuse a consumed manifest.
 2. Confirm the intended EOS 2000D is powered and USB-connected and conflicting Canon clients are stopped. Passive OS identity is supporting evidence, not an SDK model/firmware result. Keep originals and the user's profile outside the diagnostic workspace.

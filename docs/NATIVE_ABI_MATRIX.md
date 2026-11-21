@@ -4,15 +4,15 @@
 
 | Target | Current technical status | Runtime observation |
 |---|---|---|
-| `EdsChar`, `EdsInt32`, `EdsUInt32`, `EdsBool` | Canon C declarations plus LLP64 justify 1/4/4/4-byte physical widths | N2/H1A exercised the lifecycle/count/ref subset only. |
-| Opaque refs / out refs | 8-byte Windows x64 pointers; pointer-to-pointer outputs; documented ownership | H1A list/count/release succeeded on the pinned runtime. |
-| `EdsDeviceInfo` | Size 520, alignment 4, offsets 0/256/512/516; reviewed Koffi layout agrees with three labeled archives | NOT READ; H1 stopped before SDK admission. |
-| `EdsPropertyDesc` | Size 524, alignment 4, offsets 0/4/8/12; Reference/archives and compile probe agree | NOT READ; descriptor semantics remain camera-dependent. |
+| `EdsChar`, `EdsInt32`, `EdsUInt32`, `EdsBool` | Canon C declarations plus LLP64 justify 1/4/4/4-byte physical widths | Actual H1 also read device/property data and completed one session; raw aggregate UNKNOWN is separately documented. |
+| Opaque refs / out refs | 8-byte Windows x64 pointers; pointer-to-pointer outputs; documented ownership | H1A list/count/release and actual H1 child selection/session/ref cleanup were recorded on the pinned runtime. |
+| `EdsDeviceInfo` | Size 520, alignment 4, offsets 0/256/512/516; reviewed Koffi layout agrees with three labeled archives | Actual H1: 3 device-info calls returned 0; EOS 2000D identity was read. |
+| `EdsPropertyDesc` | Size 524, alignment 4, offsets 0/4/8/12; Reference/archives and compile probe agree | Actual H1: 22 descriptor calls returned 0; values remain camera/mode-dependent. |
 | `EdsAccess`, `EdsDataType` | 4-byte Windows enum representation justified | Not grounds for write permission or arbitrary property decoding. |
 | Function / callback convention | Windows x64 ABI and documented parameter shapes justified | Canon callback lifetime/quiescence unverified; H1 registers no Canon callbacks. |
 | `EdsVolumeInfo`, card/file structures, Capacity, FocusInfo | Outside targeted H1 qualification | No positive H2/H3 runtime result. VolumeInfo is not invoked by H1. |
 
-N2 completed SOURCE_ZERO_CYCLE; H1A counted one camera with five raw zero returns and confirmed cleanup. H1 is BLOCKED by its pre-SDK Electron launcher failure, not those earlier output-layout objections. [Actual identities, source commits and limits](HARDWARE_COMPATIBILITY.md).
+N2 completed SOURCE_ZERO_CYCLE and H1A counted one camera with five raw zero returns. A separately authorized H1 retry recorded camera reads and normal cleanup; its raw aggregate UNKNOWN was caused by five signed GPU-driver paths rejected by the module-location filter. The earlier pre-SDK launcher block remains historical evidence. [Actual identities, source commits and limits](HARDWARE_COMPATIBILITY.md).
 
 The inventory below retains the broader N1 source review. R means documented reference shape; U marks remaining qualification, not a requirement to obtain impossible exact-package provenance. The targeted H1 updates above take precedence. Canon API Reference 13.20.11, SHA-256 `71c3686452af13e66ffe7bc95e40f84264d7a368288d5231ccd6999fe27bdc2b`, [official Canon-linked PDF](https://canon-industrial-imaging-production.fra1.digitaloceanspaces.com/wp-content/canon_b2b/uploads/2026/09/15132330/EDSDK_API_EN-4.pdf), is the primary reference.
 
@@ -25,15 +25,15 @@ The inventory below retains the broader N1 source review. R means documented ref
 | EdsGetCameraList | out void** | CameraListRef* p42 | Implicit owned ref; release; R |
 | EdsGetChildCount | void*, out uint32* | BaseRef, UInt32* p41 | Count output, not ref; R |
 | EdsGetChildAtIndex | void*, int32, out void** | BaseRef, Int32, BaseRef* p41 | Implicit owned child ref; R |
-| EdsGetDeviceInfo | void*, out DeviceInfo* | CameraRef, DeviceInfo* p43 | Caller struct buffer; targeted H1 layout justified, actual read NOT RUN |
+| EdsGetDeviceInfo | void*, out DeviceInfo* | CameraRef, DeviceInfo* p43 | Caller struct buffer; targeted H1 layout justified; actual H1 reads returned 0 |
 | EdsOpenSession | void* | CameraRef p46 | Session lifetime on camera ref; R |
 | EdsCloseSession | void* | CameraRef p46 | Close before ref release; R, quiescence U |
 | EdsRetain | void* | UInt32(BaseRef) p40 | Refcount, not EdsError; zero is valid, 0xFFFFFFFF sentinel is UNKNOWN; guarded in source; matching runtime ABI unverified |
 | EdsRelease | void* | UInt32(BaseRef) p40 | Refcount incl valid zero; sentinel/exception is UNKNOWN and ref is retained in bounded quarantine; matching runtime ABI unverified |
-| EdsGetPropertySize | void*, uint32, int32, out uint32*, out uint32* | BaseRef, PropertyID, Int32, DataType*, UInt32* p50 | 32-bit enum width justified for H1; output bound262144; actual read NOT RUN |
+| EdsGetPropertySize | void*, uint32, int32, out uint32*, out uint32* | BaseRef, PropertyID, Int32, DataType*, UInt32* p50 | 32-bit enum width justified for H1; output bound262144; actual H1 size calls: 22 zero and 4 recorded nonzero |
 | EdsGetPropertyData | void*, uint32, int32, uint32, void* | BaseRef, PropertyID, Int32, UInt32, Void* p51 | Caller buffer; R widths, data format U |
 | EdsSetPropertyData | void*, uint32, int32, uint32, void* | BaseRef, PropertyID, Int32, UInt32, const Void* p54 | Caller input remains live for sync call; R |
-| EdsGetPropertyDesc | void*, uint32, out PropDesc* | BaseRef, PropertyID, PropertyDesc* p55 | Caller struct; targeted H1 PropDesc layout justified, actual read NOT RUN |
+| EdsGetPropertyDesc | void*, uint32, out PropDesc* | BaseRef, PropertyID, PropertyDesc* p55 | Caller struct; targeted H1 PropDesc layout justified; actual H1 descriptor calls returned 0 |
 | EdsSendCommand | void*, uint32, int32 | CameraRef, UInt32, UInt32 p47 | Signedness differs; same bits for used positive constants; U header |
 | EdsSetCapacity | void*, Capacity by value | CameraRef, Capacity p50 | U by-value layout |
 | EdsGetEvent | none | EdsError() p81 | Console event pump; source timer, native thread effect U |
@@ -59,8 +59,8 @@ The inventory below retains the broader N1 source review. R means documented ref
 
 | Source struct | Fields | Source-only default x64 arithmetic | Remaining qualification |
 |---|---|---|---|
-| DeviceInfo | char[256]×2, uint32×2 | size520/alignment4 | Targeted H1 declarations/probe justified; actual read NOT RUN |
-| PropDesc | int32×3, int32[128] | size524/alignment4 | Targeted H1 declarations/probe justified; actual read NOT RUN |
+| DeviceInfo | char[256]×2, uint32×2 | size520/alignment4 | Targeted declarations/probe plus actual H1 read observations |
+| PropDesc | int32×3, int32[128] | size524/alignment4 | Targeted declarations/probe plus actual H1 read observations |
 | DirInfo | uint64, int32, uint32×2, char[256], uint32×2 | size288/alignment8 | EdsBool, EDS_MAX_NAME, tail padding |
 | Capacity | int32×3 | size12/alignment4 | Canon by-value definition |
 | VolumeInfo | uint32×2, uint64×2, char[256] | size280/alignment8 | EdsAccess, string bound, pack |
@@ -74,8 +74,8 @@ Public p191 FocusPoint differs from legacy parser (28-byte public fields vs sour
 ## Result classes and fixes
 
 - Canon EdsError, UInt32 refcount, Win32 BOOL, HRESULT and void are separate result classes.
-- Public p40 specifies refcount error sentinel0xFFFFFFFF. Production source now distinguishes reference counts from EdsError results: zero is a valid count; the sentinel or a thrown binding call becomes UNKNOWN; failed retain does not schedule a transfer; an unacknowledged release keeps the opaque ref in bounded quarantine and blocks further native work. Focused source tests live in tests/native-production/h1-readonly.test.cjs. This removes the known source-handling defect, but does not verify the deployed Canon runtime ABI, the live camera's reference behavior, or object lifetime. H1 remains NOT RUN and must preserve/report any UNKNOWN release or session outcome; H3 transfer ownership still needs real-device qualification.
-- H1 diagnostics deliberately skip EdsGetVolumeInfo because the source VolumeInfo layout remains U; no optional volume binding is invoked until its layout is reliably qualified. DeviceInfo and PropDesc now have targeted technical qualification, but no actual H1 camera reads were performed.
+- Public p40 specifies refcount error sentinel0xFFFFFFFF. Production source now distinguishes reference counts from EdsError results: zero is a valid count; the sentinel or a thrown binding call becomes UNKNOWN; failed retain does not schedule a transfer; an unacknowledged release keeps the opaque ref in bounded quarantine and blocks further native work. Focused source tests live in tests/native-production/h1-readonly.test.cjs. This removes the known source-handling defect, but does not verify the deployed Canon runtime ABI, the live camera's reference behavior, or object lifetime. Actual H1 recorded six zero releases and a normal session close, while its separate aggregate module-location UNKNOWN remains preserved; H3 transfer ownership still needs real-device qualification.
+- H1 diagnostics deliberately skip EdsGetVolumeInfo because the source VolumeInfo layout remains U; no optional volume binding is invoked until its layout is reliably qualified. DeviceInfo and PropDesc now have targeted technical qualification and limited actual H1 read observations; that does not qualify other structures or mutating functions.
 - Public p31's one init/terminate pair conflicts with potential same-worker recheck/fallback. Matching-runtime lifecycle review is required; N2 instead makes one process/candidate/attempt.
 - Confirmed non-Canon fix: SetDllDirectoryW is 32-bit BOOL. Source now binds int32 and converts nonzero to boolean, preserving telemetry. New N2 Win32 BOOL bindings likewise use int32.
 - native-buffer uses owned V8 memory copied by msvcrt memcpy before SDK stream release. N2 did not exercise copying or transfers; that boundary remains outside the H1A result. No addon executed in the historical N1 review.
