@@ -115,7 +115,7 @@ export default function CameraCard({camera,disabled=false,onConnect,onNotice,api
       if(result.status==='completed'){
         setSelected([]);onNotice?.(t(mode==='import'?'cameraCard.imported':'cameraCard.exported',{count:number(mode==='import'?result.imported?.added??result.files?.length??0:result.files?.length||0)}));
       }else setSelected(result.remainingIds||[]);
-    }catch(cause){if(alive.current){setError(cleanError(cause));setReceipt({status:'failed',mode,remainingIds:ids,files:[],failures:[]});}}
+    }catch(cause){if(alive.current){setError(cleanError(cause));setReceipt({status:'failed',mode,operationId:retryOperationId,remainingIds:ids,files:[],failures:[]});}}
     finally{if(exportOwner.current===owner)exportOwner.current=null;if(alive.current){setExporting(false);setProgress(null);void drainThumbnails();}}
   };
   const cancel=async()=>{

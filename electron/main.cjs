@@ -55,6 +55,7 @@ let remote,remoteInfo={running:false,clients:0},commandRoutes,knownCameras=[],re
 let importQueue=Promise.resolve(),workerState=null;const assets=new Map(),applicationTasks=new Set(),workerChannels=new Set();
 let consumerRevision=0,importFailures=0;
 let cardActions;
+let backgroundControl=false;
 const lifecycleIssues=new Set();let diagnosticTail=Promise.resolve(),runtimeQuarantined=false;
 function lifecycleIssue(code){if(lifecycleIssues.size<32)lifecycleIssues.add(code);}
 let burst=null,series=null,sessionTransition=false,captureMetadata=null,focusPreview=null,accessoryBusy=false,controlBusy=false,servoTransition=null,captureQueued=false,pendingBurstStart=null,bulbStarting=null,bulbStopping=null;
@@ -67,14 +68,14 @@ function requireSession(){if(!store.sessions.some(s=>s.id===store.sessionId))thr
 function nativeOwned(){return !!workerState&&!workerState.exited&&(workerState.rpc.hasOutstanding()||!workerState.rpc.snapshot().admissionOpen);}
 const focusActive=()=>camera.connected&&['starting','holding','stopping'].includes(camera.focusHold?.status);
 function cameraIdle({allowServo=false,allowBulb=false,allowFocus=false}={}){if(runtimeQuarantined)throw Error(t('operation.unknown'));if(quitting||nativeOwned()||!allowFocus&&focusActive()||!allowBulb&&bulbActive()||!allowServo&&servoActive()||seriesActive()||burstActive()||interval||captureActive||sessionTransition||accessoryBusy||controlBusy)throw Error('Дождитесь окончания текущей команды камеры.');}
-async function cameraCommand(method,args){cameraIdle({allowServo:['servo','live','property'].includes(method)});controlBusy=true;remote?.publishState();try{return await call(method,args);}finally{controlBusy=false;remote?.publishState();}}
+async function cameraCommand(method,args){cameraIdle({allowServo:['servo','live','property'].includes(method)});setControlBusy(true);try{return await call(method,args);}finally{setControlBusy(false);}}
 function setServo(enabled){
   if(typeof enabled!=='boolean')throw Error('Некорректное состояние AI Servo.');
   if(servoTransition){if(servoTransition.enabled===enabled)return servoTransition.promise;throw Error('Дождитесь переключения AI Servo.');}
   if(!enabled&&(captureActive||controlBusy))throw Error('Дождитесь окончания текущей команды камеры.');
   const channel=workerState,epoch=channel?.nativeEpoch;
   const promise=enabled?cameraCommand('servo',{enabled:true}):(async()=>{
-    controlBusy=true;remote?.publishState();try{return worker?await call('servoStop'):camera;}finally{controlBusy=false;remote?.publishState();}
+    setControlBusy(true);try{return worker?await call('servoStop'):camera;}finally{setControlBusy(false);}
   })();
   const transition={enabled,channel,epoch,promise};servoTransition=transition;
   const settled=()=>{if(servoTransition===transition)servoTransition=null;};promise.then(settled,settled);
@@ -177,7 +178,8 @@ function exportTask(operation){if(sessionTransition)throw Error('Дождите�
 function photo(id){const p=store.photos.find(p=>p.id===id);if(!p)throw Error('Снимок не найден.');return p;}
 function asset(file){if(!file)return null;const id=crypto.createHash('sha256').update(file).digest('hex');assets.set(id,file);return `focal-asset://image/${id}`;}
 function publicPhoto(p){return {...p,thumb:asset(p.thumbPath),preview:asset(p.previewPath)};}
-const operationState=()=>({busy:nativeOwned(),ledger:workerState?.rpc.snapshot()||null});
+function setControlBusy(value,{background=false}={}){controlBusy=value;backgroundControl=value&&background;emit('operationState',operationState());remote?.publishState();}
+const operationState=()=>({busy:nativeOwned()||controlBusy,background:backgroundControl,ledger:workerState?.rpc.snapshot()||null});
 const lastReceivedPhotoId=()=>store.photos.findLast(photo=>photo.cameraTransfer===true)?.id??null;
 const publicState=()=>({...store,lastReceivedPhotoId:lastReceivedPhotoId(),locale:currentLocale(),appearance:currentAppearance(),showOnboarding:!store.settings.onboarding.completed&&(!process.env.FOCAL_TEST_DATA||process.env.FOCAL_TEST_ONBOARDING==='1'),photos:store.photos.map(publicPhoto),camera,cameras:knownCameras,remote:remoteInfo,interfaces:localInterfaces(),logs,interval,series,burst,focusPreview,captureState:{active:captureActive},operationState:operationState(),values:VALUES,watching:!!watcher,bootFailure:null});
 function remoteState(){const session=store.sessions.find(s=>s.id===store.sessionId);return {locale:currentLocale(),appearance:currentAppearance(),camera:Object.fromEntries(['connected','live','model','mode','battery','properties','cameraId','connectedAt','capabilities','saveTo','liveStats','autofocus','servo','bulb','focusHold','focusInfo','error'].map(key=>[key,camera[key]])),cameras:knownCameras,session:{name:session?.name,queueLength:session?.presetQueue?.length||0,count:session?store.photos.filter(p=>p.sessionId===session.id).length:0},presets:store.presets.map(p=>({id:p.id,name:starterPresetLabel(p,'name')})),interval,series,burst,focusPreview:camera.live?null:focusPreview,composition:store.settings.composition,busy:nativeOwned()||focusActive()||servoCaptureBlocked()||bulbActive()||captureActive||!!seriesActive()||accessoryBusy||controlBusy||sessionTransition};}
@@ -264,13 +266,13 @@ async function prepareRuntime(sdkDir,{recheck=false}={}){
   workerState.sdkDir=sdkDir;
 }
 async function withRuntime(command,{recheck=false}={}){
-  cameraIdle();controlBusy=true;remote?.publishState();
+  cameraIdle();setControlBusy(true);
   try{
     const sdkDir=store.settings.sdkDir;
     await prepareRuntime(sdkDir,{recheck});
     if(quitting)throw Error(t('operation.closed'));
     return await command(sdkDir);
-  }finally{controlBusy=false;remote?.publishState();}
+  }finally{setControlBusy(false);}
 }
 async function addFiles(files,copy=true,context){
   return importer.addFiles(files,copy,context);
@@ -326,7 +328,7 @@ function installHandlers(){
   cardActions=createCameraCardActions({call,getChannel:()=>workerState,newId:()=>crypto.randomUUID(),translate:t,emit,
     choose:()=>choose(['openDirectory','createDirectory'],t('card.choose_destination')),
     importFiles:(files,context)=>queueImport(files,false,false,context),
-    exclusive:fn=>trackApplication((async()=>{cameraIdle();controlBusy=true;remote?.publishState();try{return await fn();}finally{controlBusy=false;remote?.publishState();}})())});
+    exclusive:(fn,options)=>trackApplication((async()=>{cameraIdle();setControlBusy(true,options);try{return await fn();}finally{setControlBusy(false);}})())});
   const saveOnboarding=async patch=>{
     store.settings.onboarding=onboardingState({...store.settings.onboarding,...patch});
     await persist();
@@ -336,12 +338,12 @@ function installHandlers(){
   const chooseSdkFolder=async()=>{
     cameraIdle();
     if(camera.connected)throw Error(t('onboarding.camera_is_busy'));
-    controlBusy=true;remote?.publishState();
+    setControlBusy(true);
     try{
       const dir=await choose(['openDirectory','createDirectory'],t('desktop.choose_sdk_folder'));
       if(dir){store.settings.sdkDir=dir;await persist();emit('settings',store.settings);}
       return dir;
-    }finally{controlBusy=false;remote?.publishState();}
+    }finally{setControlBusy(false);}
   };
   const connectCamera=({cameraId,readOnly=false,controlsOnly=false,savePreference,reconfigure=false}={})=>withRuntime(async sdkDir=>{
       knownCameras=await call('listCameras',{sdkDir});emit('cameras',knownCameras);
@@ -395,7 +397,7 @@ function installHandlers(){
     reveal:({id})=>{if(id)shell.showItemInFolder(photo(id).path);else if(store.settings.captureFolder)shell.openPath(store.settings.captureFolder);return true;},
     savePreset:async p=>{const clean=validatePreset(p);store.presets=store.presets.filter(v=>v.id!==clean.id).concat(clean);await persist();emit('presets',store.presets);return clean;},
     deletePreset:async({id})=>{store.presets=store.presets.filter(p=>p.id!==id);await persist();emit('presets',store.presets);return true;},
-    applyPreset:async({id})=>{cameraIdle();const preset=store.presets.find(p=>p.id===id);if(!preset)throw Error('Пресет не найден.');controlBusy=true;try{const applied=[],failed=[];for(const [key,value] of Object.entries(preset.values)){try{await call('property',{key,value});applied.push(key);}catch(error){failed.push(key);if(['OPERATION_TIMEOUT','OPERATION_UNKNOWN_TERMINATION','OPERATION_BUSY'].includes(error.code))break;}}if(failed.length)throw Error(`Применено ${applied.length} параметров. Недоступны: ${failed.join(', ')}.`);return {applied:applied.length};}finally{controlBusy=false;remote?.publishState();}},
+    applyPreset:async({id})=>{cameraIdle();const preset=store.presets.find(p=>p.id===id);if(!preset)throw Error('Пресет не найден.');setControlBusy(true);try{const applied=[],failed=[];for(const [key,value] of Object.entries(preset.values)){try{await call('property',{key,value});applied.push(key);}catch(error){failed.push(key);if(['OPERATION_TIMEOUT','OPERATION_UNKNOWN_TERMINATION','OPERATION_BUSY'].includes(error.code))break;}}if(failed.length)throw Error(`Применено ${applied.length} параметров. Недоступны: ${failed.join(', ')}.`);return {applied:applied.length};}finally{setControlBusy(false);}},
     exportPresets:()=>exportTask(()=>exportsService.exportPresets()),
     importPresets:async()=>{const file=await choose(['openFile'],'Выберите JSON с пресетами');if(!file)return null;const stat=await fs.stat(file);if(stat.size>1024*1024)throw Error('Файл пресетов слишком большой.');const json=JSON.parse(await fs.readFile(file,'utf8'));if(json.version!==1||!Array.isArray(json.presets)||json.presets.length>200)throw Error('Неизвестный формат пресетов.');const items=json.presets.map(p=>validatePreset({...p,id:crypto.randomUUID()}));store.presets.push(...items);await persist();emit('presets',store.presets);return items.length;},
     settings:async a=>{if(a.language!==undefined&&!languages.includes(a.language))throw Error(t('language.invalid'));if(a.design!==undefined&&!['current','classic','modern'].includes(a.design))throw Error('Неизвестное оформление.');if(a.theme!==undefined&&!['light','dark','system'].includes(a.theme))throw Error('Неизвестная тема.');if(a.accentColor!==undefined&&!/^#[0-9a-f]{6}$/i.test(a.accentColor))throw Error('Укажите цвет в формате #RRGGBB.');if(a.remotePort!==undefined&&(!Number.isInteger(Number(a.remotePort))||Number(a.remotePort)<1024||Number(a.remotePort)>65535))throw Error('Порт должен быть от 1024 до 65535.');if(a.remoteHost!==undefined&&!localInterfaces().some(i=>i.address===a.remoteHost))throw Error('Выберите локальный сетевой интерфейс.');if(a.performanceMode!==undefined&&typeof a.performanceMode!=='boolean')throw Error('Некорректный режим производительности.');if(a.focusPreviewOnSuccess!==undefined&&typeof a.focusPreviewOnSuccess!=='boolean')throw Error('Некорректная настройка превью AF.');if(a.liveHistogramEnabled!==undefined&&typeof a.liveHistogramEnabled!=='boolean')throw Error(t('desktop.invalid_live_histogram_setting'));if(a.focusPreviewOnSuccess===false){focusPreview=null;emit('focusPreview',null);}if(a.language!==undefined){store.settings.language=a.language;setLocale(currentLocale());}if(a.design!==undefined)store.settings.design=a.design;for(const key of ['autofocus','focusPreviewOnSuccess','liveHistogramEnabled','grid','autoSelect','showSplashes','setupSessionSubfolder','performanceMode'])if(typeof a[key]==='boolean')store.settings[key]=a[key];if(a.theme!==undefined)store.settings.theme=a.theme;if(a.accentColor!==undefined)store.settings.accentColor=a.accentColor.toLowerCase();if(a.remotePort!==undefined)store.settings.remotePort=Number(a.remotePort);if(a.remoteHost!==undefined)store.settings.remoteHost=a.remoteHost;if(a.workspace!==undefined)store.settings.workspace=normalizeWorkspace({...store.settings.workspace,...a.workspace,panels:{...store.settings.workspace?.panels,...a.workspace?.panels}});if(a.composition!==undefined)store.settings.composition=normalizeComposition({...store.settings.composition,...a.composition,margins:{...store.settings.composition?.margins,...a.composition?.margins}});if(a.grid!==undefined)store.settings.composition=normalizeComposition({...store.settings.composition,grid:a.grid?'thirds':'off'});store.settings.grid=store.settings.composition.grid!=='off';const activeSession=store.sessions.find(s=>s.id===store.sessionId);if(activeSession){if(a.autofocus!==undefined)activeSession.autofocus=store.settings.autofocus;if(a.grid!==undefined||a.composition!==undefined){activeSession.grid=store.settings.grid;activeSession.composition=store.settings.composition;}}await persist();emit('settings',store.settings);return store.settings;},

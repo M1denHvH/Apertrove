@@ -10,6 +10,7 @@ function fixture(){
   const port={shutterInput:value=>value||{},shutterTrace:()=>{},camera:{connected:true,servo:{enabled:false,status:'off'},properties:{driveMode:{value:1}}},
     worker:{},workerState:channel,quitting:false,runtimeQuarantined:false,interval:null,captureActive:false,sessionTransition:false,accessoryBusy:false,controlBusy:false,servoTransition:null,captureQueued:false,pendingBurstStart:null,burst:null,
     store:{sessionId:'session',sessions:[{id:'session'}]},burstActive:()=>false,seriesActive:()=>false,t:key=>key,remote:{publishState(){}},crypto:{randomUUID:()=> 'synthetic-burst'},emit(){},log(){},importQueue:Promise.resolve(),trackApplication:job=>job,
+    setControlBusy(value){port.controlBusy=value;},
     call(method,args){
       calls.push({method,args});
       return new Promise((resolve,reject)=>pending.push({method,resolve(value){pending.splice(pending.indexOf(this),1);resolve(value);},reject(error){pending.splice(pending.indexOf(this),1);reject(error);}}));

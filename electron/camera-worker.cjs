@@ -24,7 +24,7 @@ const {createFocusHold}=require('./focus-hold.cjs');
 const {profileByFingerprint,createCanonBulbAdapter,bulbExposureSeconds,createFlashPopupControl}=require('./canon-exposure-protocol.cjs');
 const {cameraAccessorySupport}=require('./camera-accessory-support.cjs');
 const {createLiveOrientation,ORIENTATION}=require('./live-orientation.cjs');
-const {createCameraCard,cardProfile}=require('./camera-card.cjs');
+const {createCameraCard,cardProfile,parseCardVolume}=require('./camera-card.cjs');
 const {createCameraDownload}=require('./camera-download.cjs');
 const parent = process.parentPort;
 const generation=process.argv.find(value=>value.startsWith('--apertrove-generation='))?.slice('--apertrove-generation='.length);
@@ -625,9 +625,10 @@ const focusHold=createFocusHold({
   restore:async()=>{
     const previous=focusRestore;focusRestore=null;if(!previous)return;
     if(!camera||sessionEpoch!==previous.epoch)return;
+    liveOrientation.stop();
     try{set(0x500,previous.output);set(0x501,previous.mode);if(get(0x500)!==previous.output||get(0x501)!==previous.mode)throw Error('Камера не подтвердила восстановление Live View.');}
     catch(error){teardownUncertain=true;observations.failure({operation:'focus',phase:'evf-restore',method:'EdsSetPropertyData',error});send({event:'nativeObservation',data:{method:'EdsSetPropertyData',phase:'evf-restore',classification:'UNKNOWN'}});throw error;}
-    finally{live=false;liveOrientation.stop();releaseEvf();state.liveStats=null;status();}
+    finally{live=false;releaseEvf();state.liveStats=null;status();}
   }
 });
 function download(ref,folder,isCapture=false,context) {
@@ -669,23 +670,23 @@ function capture({autofocus=true,folder,burstMs=0,route,captureId,input},operati
 function stopBurst(){try{if(captureWait?.latch)captureWait.latch.release();}catch(error){failCapture(error);throw error;}return {released:true};}
 
 const cardYield=()=>new Promise(resolve=>setImmediate(resolve));
-function cardEnsure(){ensure();if(state.controlsOnly)throw operationError('OPERATION_ADMISSION_CLOSED','File transfer is disabled for this connection.');if(captureWait||controls.isBusy())throw operationError('OPERATION_BUSY','Wait for the camera command to finish.');}
-function cardNative(method,call){let code;try{code=call();}catch(error){teardownUncertain=true;try{observed(method,'download',()=>{throw error;});}catch{}throw operationError('OPERATION_UNKNOWN_TERMINATION','The camera native operation outcome is unknown.');}if(!Number.isInteger(code)||code<0||code>0xffffffff){teardownUncertain=true;observed(method,'download',()=>code);throw operationError('OPERATION_UNKNOWN_TERMINATION','The camera returned an invalid native result.');}return code;}
+function cardEnsure(){ensureWorking();if(state.controlsOnly)throw operationError('OPERATION_ADMISSION_CLOSED','File transfer is disabled for this connection.');if(captureWait||controls.isBusy())throw operationError('OPERATION_BUSY','Wait for the camera command to finish.');}
+function cardNative(method,call){if(teardownUncertain)throw operationError("OPERATION_UNKNOWN_TERMINATION","The previous camera native result is unknown.");let code;try{code=call();}catch(error){teardownUncertain=true;try{observed(method,'download',()=>{throw error;});}catch{}throw operationError('OPERATION_UNKNOWN_TERMINATION','The camera native operation outcome is unknown.');}if(!Number.isInteger(code)||code<0||code>0xffffffff){teardownUncertain=true;observed(method,'download',()=>code);throw operationError('OPERATION_UNKNOWN_TERMINATION','The camera returned an invalid native result.');}return code;}
 function cardInfo(ref){const info={};check(cardNative('EdsGetDirectoryItemInfo',()=>sdk.dir(ref,info)),'Camera file information');return info;}
 function cardChunk(ref,count){
   const out=[null];let stream;
   try{check(cardNative('EdsCreateMemoryStream',()=>sdk.stream(count,out)),'Camera download buffer');stream=out[0];check(cardNative('EdsDownload',()=>sdk.download(ref,count,stream)),'Camera download');const pointer=[null],length=[0];check(cardNative('EdsGetPointer',()=>sdk.pointer(stream,pointer)),'Camera buffer');check(cardNative('EdsGetLength',()=>sdk.length(stream,length)),'Camera buffer size');if(Number(length[0])!==count)throw operationError('CARD_DOWNLOAD_SHORT','The camera returned an incomplete file.');return copyNativeBuffer(pointer[0],count);}
   finally{if(stream)releaseRef(stream,'download-stream-release');}
 }
-const cardDownloader=createCameraDownload({info:cardInfo,chunk:cardChunk,complete:ref=>check(cardNative('EdsDownloadComplete',()=>sdk.complete(ref)),'Camera download completion'),cancel:ref=>check(cardNative('EdsDownloadCancel',()=>sdk.cancel(ref)),'Camera download cancellation'),yield:cardYield,cleanupIssue:()=>send({event:'transferIssue',data:{code:'CARD_TEMPORARY_CLEANUP_FAILED'}})});
+const cardDownloader=createCameraDownload({info:cardInfo,chunk:cardChunk,complete:ref=>check(cardNative('EdsDownloadComplete',()=>sdk.complete(ref)),'Camera download completion'),cancel:ref=>{const code=cardNative('EdsDownloadCancel',()=>sdk.cancel(ref));if(code!==0){teardownUncertain=true;observed('EdsDownloadCancel','download',()=>code);throw operationError('OPERATION_UNKNOWN_TERMINATION','Camera download cancellation is unconfirmed.');}},yield:cardYield,cleanupIssue:()=>send({event:'transferIssue',data:{code:'CARD_TEMPORARY_CLEANUP_FAILED'}})});
 const cameraCard=createCameraCard({
   ensure:cardEnsure,epoch:()=>sessionEpoch,camera:()=>camera,connected:()=>!!camera&&state.connected&&!teardownUncertain,
   qualified:()=>cardProfile(state.sdkFingerprint)&&typeof sdk?.volumeRaw==='function',
   child:(ref,index)=>{const out=[null];check(cardNative('EdsGetChildAtIndex',()=>sdk.child(ref,index,out)),'Camera item');if(!out[0])throw operationError('CARD_REFERENCE_INVALID','The camera returned an invalid item.');return out[0];},
   count:ref=>{const count=[0];check(cardNative('EdsGetChildCount',()=>sdk.count(ref,count)),'Camera folder');return count[0];},
-  info:cardInfo,release:ref=>releaseRef(ref,'card-item-release'),retain:ref=>{const count=transferReferences.retain(ref);if(!Number.isInteger(count)||count<1||count>=0xffffffff)throw operationError('OPERATION_UNKNOWN_TERMINATION','Camera item retention is unknown.');return ref;},
-  volume:ref=>{const bytes=Buffer.alloc(280);check(cardNative('EdsGetVolumeInfo',()=>sdk.volumeRaw(ref,bytes)),'Camera card information');return {type:bytes.readUInt32LE(0),access:bytes.readUInt32LE(4),capacity:Number(bytes.readBigUInt64LE(8)),free:Number(bytes.readBigUInt64LE(16)),label:bytes.subarray(24,280)};},
-  thumbnail:ref=>{const out=[null];let stream;try{check(sdk.stream(0,out),'Camera thumbnail buffer');stream=out[0];check(sdk.thumbnail(ref,stream),'Camera thumbnail');const pointer=[null],length=[0];check(sdk.pointer(stream,pointer),'Camera thumbnail');check(sdk.length(stream,length),'Camera thumbnail size');const bytes=Number(length[0]);if(!Number.isSafeInteger(bytes)||bytes<3||bytes>8*1024*1024)throw operationError('CARD_THUMBNAIL_INVALID','Camera thumbnail is unavailable.');return copyNativeBuffer(pointer[0],bytes);}finally{if(stream)releaseRef(stream,'thumbnail-stream-release');}},
+  info:cardInfo,release:ref=>{if(!releaseRef(ref,'card-item-release'))throw operationError('OPERATION_UNKNOWN_TERMINATION','Camera item release is unknown.');},retain:ref=>{const count=transferReferences.retain(ref);if(!Number.isInteger(count)||count<1||count>=0xffffffff){teardownUncertain=true;throw operationError('OPERATION_UNKNOWN_TERMINATION','Camera item retention is unknown.');}return ref;},
+  volume:ref=>{const bytes=Buffer.alloc(280);check(cardNative('EdsGetVolumeInfo',()=>sdk.volumeRaw(ref,bytes)),'Camera card information');return parseCardVolume(bytes);},
+  thumbnail:ref=>{const out=[null];let stream;try{check(cardNative('EdsCreateMemoryStream',()=>sdk.stream(0,out)),'Camera thumbnail buffer');stream=out[0];check(cardNative('EdsDownloadThumbnail',()=>sdk.thumbnail(ref,stream)),'Camera thumbnail');const pointer=[null],length=[0];check(cardNative('EdsGetPointer',()=>sdk.pointer(stream,pointer)),'Camera thumbnail');check(cardNative('EdsGetLength',()=>sdk.length(stream,length)),'Camera thumbnail size');const bytes=Number(length[0]);if(!Number.isSafeInteger(bytes)||bytes<3||bytes>8*1024*1024)throw operationError('CARD_THUMBNAIL_INVALID','Camera thumbnail is unavailable.');return copyNativeBuffer(pointer[0],bytes);}finally{if(stream)releaseRef(stream,'thumbnail-stream-release');}},
   download:(...args)=>cardDownloader.download(...args),yield:cardYield,progress:data=>send({event:'cardExportProgress',data})
 });
 async function listCard(args){return cameraCard.list(args);}

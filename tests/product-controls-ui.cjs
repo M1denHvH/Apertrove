@@ -28,6 +28,8 @@ const driver=(method,...args)=>app.evaluate((_electron,{method,args})=>globalThi
 const configure=args=>driver('workerControl','configure',args);
 const catalog=read(path.join(root,'electron/i18n/locales/en-US.json')),label=key=>catalog[key];
 const button=key=>page.getByRole('button',{name:label(key),exact:true});
+const bulbPress=async()=>{const button=page.getByRole('button',{name:label('desktop.bulb_hold'),exact:true});await page.waitForFunction(()=>!document.querySelector('.bulb-control [data-held]')?.disabled);await button.dispatchEvent('pointerdown',{pointerId:77,pointerType:'mouse',button:0,bubbles:true});};
+const bulbRelease=()=>page.evaluate(()=>window.dispatchEvent(new PointerEvent('pointerup',{pointerId:77,bubbles:true})));
 const nav=key=>page.locator('.sidebar .nav-item').filter({hasText:label('desktop.'+key)}).click();
 const evidence=name=>page.screenshot({path:path.join(fixture,'artifacts',name+'.png')});
 async function servoMenu(){await page.locator('.af-mode-toggle').click();return page.getByRole('menuitemcheckbox',{name:label('desktop.servo_toggle'),exact:true});}
@@ -149,10 +151,10 @@ async function run(){
    await page.locator('.af-primary').click();await assertServo(false);await command('property',{key:'driveMode',value:0});
  });
  await check('BULB uses camera events, explicit end and honest error ownership',async()=>{
-   await command('property',{key:'shutter',value:0x0c});const start=button('desktop.bulb_start');await start.click();await page.locator('.bulb-control[data-state=exposing]').waitFor();await assert.rejects(command('capture'));await assert.rejects(command('property',{key:'iso',value:80}));await assert.rejects(command('sessionOpen',{id:'light'}));assert.equal(await page.locator('.capture-button-group button').last().isDisabled(),true);await page.locator('.bulb-status output').filter({hasText:label('desktop.bulb_waiting')}).waitFor();
+   await command('property',{key:'shutter',value:0x0c});const start=button('desktop.bulb_hold');await bulbPress();await page.locator('.bulb-control[data-state=exposing]').waitFor();await assert.rejects(command('capture'));await assert.rejects(command('property',{key:'iso',value:80}));await assert.rejects(command('sessionOpen',{id:'light'}));assert.equal(await page.locator('.capture-button-group button').last().isDisabled(),true);await page.locator('.bulb-status output').filter({hasText:label('desktop.bulb_waiting')}).waitFor();
    await configure({bulbElapsed:7});await page.locator('.bulb-status output').filter({hasText:'7 s'}).waitFor();await page.waitForTimeout(320);assert.equal((await page.locator('.bulb-status output').textContent()).trim(),'7 s');
-   await button('desktop.bulb_stop').click();await page.locator('.bulb-control[data-state=idle]').waitFor();await configure({nextBulbError:'start'});await start.click();await page.locator('.bulb-control[data-state=error]').waitFor();assert.equal((await command('boot')).camera.bulb.startAcknowledged,false);
-   await start.click();await page.locator('.bulb-control[data-state=exposing]').waitFor();await configure({nextBulbError:'stop'});await button('desktop.bulb_stop').click();await page.locator('.bulb-control[data-state=error]').waitFor();assert.equal((await command('boot')).camera.bulb.confirmation,'unknown');assert.equal(await page.locator('.capture-button-group button').last().isDisabled(),true);await button('desktop.bulb_stop').click();await page.locator('.bulb-control[data-state=idle]').waitFor();await command('property',{key:'shutter',value:0x70});
+   await bulbRelease();await page.locator('.bulb-control[data-state=idle]').waitFor();await configure({nextBulbError:'start'});await bulbPress();await page.locator('.bulb-control[data-state=error]').waitFor();await bulbRelease();assert.equal((await command('boot')).camera.bulb.startAcknowledged,false);
+   await bulbPress();await page.locator('.bulb-control[data-state=exposing]').waitFor();await configure({nextBulbError:'stop'});await bulbRelease();await page.locator('.bulb-control[data-state=error]').waitFor();assert.equal((await command('boot')).camera.bulb.confirmation,'unknown');assert.equal(await page.locator('.capture-button-group button').last().isDisabled(),true);await button('desktop.bulb_stop').click();await page.locator('.bulb-control[data-state=idle]').waitFor();await command('property',{key:'shutter',value:0x70});
  });
  await check('delayed fake transfer commits original, session and last-received identity before UI success',async()=>{
    await configure({nextCapture:{mode:'delayed',delayMs:160}});
@@ -195,7 +197,7 @@ async function run(){
  }
  await configure({bulbQualified:true});
  await check('disconnect clears Live View without claiming exposure or focus completion',async()=>{
-   await visibleCapture();await command('live',{enabled:true});await command('property',{key:'shutter',value:0x0c});await button('desktop.bulb_start').click();await page.locator('.bulb-control[data-state=exposing]').waitFor();await configure({disconnect:true});await page.waitForFunction(()=>!document.querySelector('.live-canvas'));assert.equal(await page.locator('.live-histogram-toggle').count(),0);assert.equal((await command('boot')).camera.bulb.confirmation,'unknown');assert.equal(await page.locator('.bulb-control button').isDisabled(),true);
+   await visibleCapture();await command('live',{enabled:true});await command('property',{key:'shutter',value:0x0c});await bulbPress();await page.locator('.bulb-control[data-state=exposing]').waitFor();await configure({disconnect:true});await page.waitForFunction(()=>!document.querySelector('.live-canvas'));assert.equal(await page.locator('.live-histogram-toggle').count(),0);assert.equal((await command('boot')).camera.bulb.confirmation,'unknown');assert.ok((await page.locator('.bulb-control button').all()).length);for(const b of await page.locator('.bulb-control button').all())assert.equal(await b.isDisabled(),true);await bulbRelease();
  });
  await check('BULB disconnect history does not block reconnect and a fresh controller starts stopped',async()=>{
    const historical=(await command('boot')).camera.bulb;assert.equal(historical.confirmation,'unknown');
@@ -203,7 +205,7 @@ async function run(){
    // only a direct IPC call that would miss a stale disconnected UI busy guard.
    const reconnect=page.locator('.camera-card-bottom button');await reconnect.waitFor();assert.equal(await reconnect.isEnabled(),true);await reconnect.click();await page.waitForFunction(async()=>(await window.focal.boot()).camera.connected===true);await page.locator('.capture-button-group button').last().waitFor();await page.waitForFunction(()=>document.querySelector('.capture-button-group button')?.disabled===false);
    const state=await command('boot');assert.equal(state.camera.bulb.status,'idle');assert.equal(state.camera.bulb.confirmation,'command-accepted');assert.equal(state.camera.servo.enabled,false);assert.equal(historical.confirmation,'unknown');
-   await command('property',{key:'shutter',value:0x0c});await button('desktop.bulb_start').click();await page.locator('.bulb-control[data-state=exposing]').waitFor();await button('desktop.bulb_stop').click();await page.locator('.bulb-control[data-state=idle]').waitFor();await command('property',{key:'shutter',value:0x70});
+   await command('property',{key:'shutter',value:0x0c});await bulbPress();await page.locator('.bulb-control[data-state=exposing]').waitFor();await bulbRelease();await page.locator('.bulb-control[data-state=idle]').waitFor();await command('property',{key:'shutter',value:0x70});
  });
  assert.deepEqual(errors,[]);const info=await driver('info');const provider=await driver('workerControl','snapshot');assert.equal(provider.nativeCalls,0);assert.deepEqual(info.guard.unexpectedDenials,[]);assert.ok(provider.denials.every(item=>item.expected));
  await command('window',{action:'close'});await app.close();app=null;

@@ -16,6 +16,43 @@ test('card errors leave the workflow available for a retry and keep the error vi
 test('thumbnails cross the bridge as bounded data URLs without an original download',async()=>{const r=rig(),thumb=await r.actions.cardThumbnail({id:'one'});assert.match(thumb.image,/^data:image\/jpeg;base64,/);assert.equal(thumb.bytes,undefined);assert.equal(r.calls.length,1);assert.equal(r.calls[0][0],'cardThumbnail');});
 test('selection validation rejects malformed or empty input before camera calls',async()=>{for(const ids of [[],null,[''],[4]]){const r=rig();await assert.rejects(r.actions.cardExport({ids}));assert.deepEqual(r.calls,[]);}});
 
+function importRig(){
+  const calls=[],imports=[],files=['one','two'].map(id=>({id,name:id+'.jpg',path:'synthetic-export/'+id+'.jpg'}));let serial=0,fail=true,importHook=null,choices=0;
+  const channel={rpc:{cancelMethod:()=>0}};
+  const actions=createCameraCardActions({exclusive:fn=>fn(),newId:()=>String(++serial),getChannel:()=>channel,emit:()=>{},choose:async()=>{choices++;return 'synthetic-export';},
+    call:async(method,args)=>{calls.push({method,args});return {status:'completed',files:files.filter(file=>args.ids.includes(file.id)),failures:[],remainingIds:[]};},
+    importFiles:async(paths,context)=>{imports.push({paths,context});if(importHook)await importHook();if(fail)throw Error('Library registration failed');return {added:1};}});
+  return {actions,calls,imports,channel,choices:()=>choices,recover:()=>fail=false,hook:value=>importHook=value};
+}
+test('failed Library registration retains saved originals and retry does not download or choose again',async()=>{
+  const r=importRig(),first=await r.actions.cardExport({ids:['one','two'],mode:'import'});
+  assert.equal(first.status,'partial');assert.deepEqual(first.remainingIds,['one','two']);assert.equal(first.imported.errors.length,2);assert.equal(first.files.length,2);
+  r.recover();const second=await r.actions.cardExport({ids:first.remainingIds,mode:'import',retryOperationId:first.operationId});
+  assert.equal(second.status,'completed');assert.equal(second.imported.added,2);assert.deepEqual(second.remainingIds,[]);assert.equal(r.calls.length,1);assert.equal(r.choices(),1);assert.ok(r.imports.every(item=>item.context.sessionId===null));
+});
+test('cancelling Library registration preserves completed work and retries only its saved unfinished file',async()=>{
+  const r=importRig();r.recover();r.hook(async()=>{r.hook(null);r.actions.cardExportCancel();});
+  const first=await r.actions.cardExport({ids:['one','two'],mode:'import'});
+  assert.equal(first.cancelled,true);assert.equal(first.imported.added,1);assert.deepEqual(first.remainingIds,['two']);
+  const second=await r.actions.cardExport({ids:first.remainingIds,mode:'import',retryOperationId:first.operationId});
+  assert.equal(second.imported.added,1);assert.equal(second.status,'completed');assert.equal(r.calls.length,1);assert.equal(r.imports.length,2);assert.deepEqual(r.imports[1].paths,['synthetic-export/two.jpg']);
+});
+test('a partial import receipt cannot supply saved files to a fresh unrelated export',async()=>{
+  const r=importRig(),first=await r.actions.cardExport({ids:['one'],mode:'import'});r.recover();
+  await r.actions.cardExport({ids:['one'],mode:'export',retryOperationId:first.operationId});
+  assert.equal(r.calls.length,2);assert.equal(r.choices(),2);
+});
+test('a rejected pending download preserves the earlier partial import receipt for the next retry',async()=>{
+  const calls=[],channel={},one={id:'one',name:'one.jpg',path:'synthetic-export/one.jpg'},two={id:'two',name:'two.jpg',path:'synthetic-export/two.jpg'};let round=0,failImport=true;
+  const actions=createCameraCardActions({exclusive:fn=>fn(),newId:()=>String(++round),getChannel:()=>channel,choose:async()=> 'synthetic-export',emit:()=>{},
+    call:async(_method,args)=>{calls.push(args.ids);if(round===2)throw Error('Read temporarily unavailable');return round===1?{status:'partial',files:[one],failures:[{id:'two',error:'Read error'}],remainingIds:['two']}:{status:'completed',files:[two],failures:[],remainingIds:[]};},
+    importFiles:async()=>{if(failImport)throw Error('Registration failed');return {added:1};}});
+  const first=await actions.cardExport({ids:['one','two'],mode:'import'});
+  await assert.rejects(actions.cardExport({ids:first.remainingIds,mode:'import',retryOperationId:first.operationId}),/Read temporarily/);failImport=false;
+  const result=await actions.cardExport({ids:first.remainingIds,mode:'import',retryOperationId:first.operationId});
+  assert.equal(result.imported.added,2);assert.equal(result.status,'completed');assert.deepEqual(calls,[['one','two'],['two'],['two']]);
+});
+
 test('the actual operation client cancels only the requested method and retains ownership until acknowledgement',async()=>{
   const {createOperationClient}=require('../electron/operation-lifecycle.cjs'),messages=[];
   const client=createOperationClient({generation:'card-worker',send:message=>messages.push(message),isExclusive:()=>false});
