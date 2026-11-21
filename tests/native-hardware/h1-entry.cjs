@@ -7,9 +7,13 @@ const nonce=process.argv.find(arg=>arg.startsWith('--h1-nonce='))?.slice('--h1-n
 if(!configPath||!path.isAbsolute(configPath)||!/^[a-f0-9]{48}$/.test(nonce||''))throw Error('H1_ENTRY_ADMISSION_REQUIRED');
 const config=JSON.parse(fs.readFileSync(configPath,'utf8'));
 if(config.nonce!==nonce||config.kind!=='H1_REAL_ELECTRON_READ_ONLY'||process.env.NODE_OPTIONS||process.env.NODE_PATH||process.env.FOCAL_TEST_DATA!==path.join(config.output,'profile'))throw Error('H1_ENTRY_CONFIGURATION_MISMATCH');
+// Resolve every writable Electron location before its native startup can create children.
+const paths={userData:path.join(config.output,'profile'),sessionData:path.join(config.output,'chromium'),appData:path.join(config.output,'environment','APPDATA'),temp:path.join(config.output,'temp'),crashDumps:path.join(config.output,'crashes')};
+for(const [key,value]of Object.entries(paths)){fs.mkdirSync(value,{recursive:true});app.setPath(key,value);}
+app.setAppPath(root);app.setAppLogsPath(path.join(config.output,'logs'));
 const hash=file=>crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
 const observations={workers:[],ipc:[],denials:[],childEvents:[]};
-function save(){try{fs.writeFileSync(path.join(config.output,'electron-entry.json'),JSON.stringify({pid:process.pid,versions:process.versions,paths:{userData:app.getPath('userData'),appData:app.getPath('appData')},observations},null,2)+'\n');}catch{}}
+function save(){try{fs.writeFileSync(path.join(config.output,'electron-entry.json'),JSON.stringify({pid:process.pid,versions:process.versions,paths,observations},null,2)+'\n');}catch{}}
 function deny(kind,detail){observations.denials.push({kind,detail});save();throw Error('H1_ENTRY_DENIED: '+kind);}
 const rawFork=utilityProcess.fork.bind(utilityProcess);
 utilityProcess.fork=(file,args=[],options={})=>{
@@ -36,10 +40,12 @@ app.on('child-process-gone',(_event,value)=>{observations.childEvents.push(value
 app.on('will-quit',save);process.on('exit',save);
 globalThis.__h1=Object.freeze({info:()=>({pid:process.pid,versions:process.versions,metrics:app.isReady()?app.getAppMetrics().map(item=>({pid:item.pid,type:item.type,serviceName:item.serviceName})):[],observations})});
 fs.writeFileSync(path.join(config.output,'entry-ready.json'),JSON.stringify({pid:process.pid,parentPid:process.ppid,nonce,productionLoaded:false}));
-let released=false;const gatedAt=Date.now();
-const timer=setInterval(()=>{
-  if(Date.now()-gatedAt>15000){clearInterval(timer);save();app.exit(96);return;}
-  if(!fs.existsSync(config.gate))return;
+let released=false;const gatedAt=Date.now(),pause=new Int32Array(new SharedArrayBuffer(4));
+// Returning to the event loop here starts Chromium children before Job assignment.
+// The independent parent/supervisor can grant admission while this main thread waits.
+while(!fs.existsSync(config.gate)&&Date.now()-gatedAt<15000)Atomics.wait(pause,0,0,20);
+if(!fs.existsSync(config.gate)){save();app.exit(96);}
+else{
   try{
     const grant=JSON.parse(fs.readFileSync(config.gate,'utf8'));
     if(released||grant.nonce!==nonce||grant.pid!==process.pid||grant.jobAssigned!==true||!Array.isArray(grant.jobPids))throw Error('H1_GATE_INVALID');
@@ -48,7 +54,7 @@ const timer=setInterval(()=>{
     observations.startupMetrics=startupMetrics;
     if(startupMetrics.some(item=>!grant.jobPids.includes(item.pid)))throw Error('H1_STARTUP_CHILD_NOT_IN_JOB');
     for(const [name,digest] of Object.entries(config.sourceHashes))if(hash(path.join(root,name))!==digest)throw Error('H1_ENTRY_SOURCE_CHANGED: '+name);
-    released=true;clearInterval(timer);require('../../electron/main.cjs');
+    released=true;require('../../electron/main.cjs');
   }catch(error){fs.writeFileSync(path.join(config.output,'bootstrap-error.json'),JSON.stringify({error:String(error.stack||error)}));app.exit(98);}
-},20);
+}
 const hard=setTimeout(()=>{save();app.exit(97);},45000);hard.unref();

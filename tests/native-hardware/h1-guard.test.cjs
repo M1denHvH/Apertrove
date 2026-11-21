@@ -43,3 +43,27 @@ test('H1 retains a thrown binding call as an explicit trace exception without in
   const rows=fs.readFileSync(tracePath,'utf8').trim().split('\n').map(JSON.parse).filter(row=>row.name==='EdsGetPropertyData');
   assert.deepEqual(rows.map(row=>row.phase),['before','throw']);assert.equal(Object.hasOwn(rows[1],'result'),false);
 });
+
+function entryFixture({grantAfterMs=40,grantPatch={},sourceChanged=false,startupPids=[]}={}){
+  const fs=require('node:fs'),vm=require('node:vm'),crypto=require('node:crypto'),{EventEmitter}=require('node:events');
+  const entry=path.join(__dirname,'h1-entry.cjs'),root=path.resolve(__dirname,'../..'),output=path.join(root,'qa/native-hardware/h1-runs/synthetic-vm'),configPath=path.join(output,'config.json'),gate=path.join(output,'grant.json'),nonce='a'.repeat(48),calls=[],writes=new Map();
+  let now=0,mainLoaded=false;const content=Buffer.from('synthetic pinned source');
+  const config={nonce,kind:'H1_REAL_ELECTRON_READ_ONLY',output,gate,sourceHashes:{'electron/main.cjs':crypto.createHash('sha256').update(content).digest('hex')}};
+  const grant={nonce,pid:123,jobAssigned:true,jobPids:[123],...grantPatch};
+  const fakeFs={mkdirSync:file=>calls.push(['mkdir',file]),existsSync:file=>file===gate&&now>=grantAfterMs,writeFileSync:(file,value)=>{writes.set(path.basename(file),String(value));calls.push(['write',path.basename(file)]);},readFileSync:file=>{if(file===configPath)return JSON.stringify(config);if(file===gate)return JSON.stringify(grant);if(file===path.join(root,'electron/main.cjs'))return sourceChanged?Buffer.from('changed'):content;throw Error('UNEXPECTED_VM_READ: '+file);}};
+  const app=new EventEmitter();Object.assign(app,{setPath:(key,value)=>calls.push(['setPath',key,value]),setAppPath:value=>calls.push(['setAppPath',value]),setAppLogsPath:value=>calls.push(['setAppLogsPath',value]),getPath:()=>output,isReady:()=>startupPids.length>0,getAppMetrics:()=>startupPids.map(pid=>({pid,type:'synthetic'})),exit:code=>{throw Object.assign(Error('VM_EXIT_'+code),{exitCode:code});}});
+  const electron={app,utilityProcess:{fork:()=>{throw Error('SYNTHETIC_WORKER_DENIED');}},ipcMain:{handle:()=>{}},session:{},shell:{},dialog:{}};
+  const processStub={argv:['electron',entry,'--h1-config='+configPath,'--h1-nonce='+nonce],env:{FOCAL_TEST_DATA:path.join(output,'profile'),NODE_OPTIONS:'',NODE_PATH:''},pid:123,ppid:456,versions:{electron:'synthetic'},on:()=>{}};
+  const sandbox={__dirname,__filename:entry,process:processStub,URL,Int32Array,SharedArrayBuffer,Date:class extends Date{static now(){return now;}},Atomics:{wait:(_array,_index,_value,ms)=>{assert.equal(mainLoaded,false);assert.ok(calls.some(row=>row[0]==='write'&&row[1]==='entry-ready.json'));now+=ms;}},setInterval:()=>{throw Error('ASYNC_GATE_DENIED');},setTimeout:()=>({unref:()=>{}}),require:request=>{if(request==='node:fs')return fakeFs;if(request==='node:path')return path;if(request==='node:crypto')return crypto;if(request==='electron')return electron;if(request==='../../electron/main.cjs'){assert.ok(now>=grantAfterMs);assert.ok(now<15000);mainLoaded=true;calls.push(['main']);return {};}throw Error('UNEXPECTED_VM_IMPORT: '+request);}};
+  let error=null;try{vm.runInNewContext(fs.readFileSync(entry,'utf8'),sandbox,{filename:entry,timeout:1000});}catch(value){error=value;}
+  return {error,mainLoaded,now,calls,writes,output};
+}
+test('H1 entry sets confined Electron paths and synchronously waits for Job grant before main',()=>{
+  const f=entryFixture();assert.equal(f.error,null);assert.equal(f.mainLoaded,true);assert.equal(f.now,40);
+  const paths=f.calls.filter(row=>row[0]==='setPath');assert.equal(paths.length,5);for(const [,key,value]of paths){assert.ok(!path.relative(f.output,value).startsWith('..'),key);assert.ok(f.calls.indexOf(paths.find(row=>row[1]===key))<f.calls.findIndex(row=>row[0]==='write'&&row[1]==='entry-ready.json'));}
+  assert.ok(f.calls.findIndex(row=>row[0]==='setAppLogsPath')<f.calls.findIndex(row=>row[0]==='main'));
+});
+test('H1 entry denies invalid nonce/source, uncontained startup child and missing Job grant',()=>{
+  for(const [options,detail]of [[{grantPatch:{nonce:'b'.repeat(48)}},'H1_GATE_INVALID'],[{sourceChanged:true},'H1_ENTRY_SOURCE_CHANGED'],[{startupPids:[123,999]},'H1_STARTUP_CHILD_NOT_IN_JOB']]){const f=entryFixture(options);assert.equal(f.mainLoaded,false);assert.equal(f.error.exitCode,98);assert.match(f.writes.get('bootstrap-error.json'),new RegExp(detail));}
+  const timeout=entryFixture({grantAfterMs:Infinity});assert.equal(timeout.mainLoaded,false);assert.equal(timeout.now,15000);assert.equal(timeout.error.exitCode,96);
+});
