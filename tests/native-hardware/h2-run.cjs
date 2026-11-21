@@ -20,6 +20,11 @@ function sourceHashes(){
 }
 function validate(manifest,{execute=false}={}){
   if(manifest?.schema!==1||manifest.purpose!=='H2_REAL_ELECTRON_CONTROLS_ONLY'||JSON.stringify(manifest.allowedCanonCalls)!==JSON.stringify(allowed))throw Error('H2_MANIFEST_SCOPE_DENIED');
+  if(!['FULL','FOCUS_ONLY'].includes(manifest.stageScope))throw Error('H2_STAGE_SCOPE_INVALID');
+  if(manifest.stageScope==='FOCUS_ONLY'){
+    if(!manifest.previousH2Result||hash(manifest.previousH2Result.path)!==manifest.previousH2Result.sha256)throw Error('H2_PREVIOUS_RESULT_PIN_REQUIRED');
+    qualifyPreviousH2(read(manifest.previousH2Result.path));
+  }
   const admission=h1a.validate(manifest.h1aManifest,{execute});
   if(admission.ready!==true||!Array.isArray(admission.blockers)||admission.blockers.length!==0)throw Error('H2_BASE_ADMISSION_NOT_READY');
   if(hash(manifest.h1Result.path)!==manifest.h1Result.sha256||hash(manifest.gpuReview.path)!==manifest.gpuReview.sha256)throw Error('H2_H1_EVIDENCE_CHANGED');
@@ -39,9 +44,11 @@ function validate(manifest,{execute=false}={}){
   return admission;
 }
 async function prepare(args){
-  if(args.length!==4||args[0]!=='--h1-result'||args[2]!=='--gpu-review'||!path.isAbsolute(args[1])||!path.isAbsolute(args[3]))throw Error('USAGE: h2-run.cjs --prepare --h1-result <original H1 result.json> --gpu-review <reviewed JSON>');
+  const focusOnly=args.includes('--focus-only');let previousH2Result;
+  if(focusOnly){if(args.length!==7||args[4]!=='--focus-only'||args[5]!=='--previous-h2-result'||!path.isAbsolute(args[6]))throw Error('H2_FOCUS_ONLY_PREVIOUS_RESULT_REQUIRED');previousH2Result={path:fs.realpathSync(args[6]),sha256:hash(args[6])};args=args.slice(0,4);}
+  if(args.length!==4||args[0]!=='--h1-result'||args[2]!=='--gpu-review'||!path.isAbsolute(args[1])||!path.isAbsolute(args[3]))throw Error('USAGE: h2-run.cjs --prepare --h1-result <original H1 result.json> --gpu-review <reviewed JSON> [--focus-only --previous-h2-result <original H2 result.json>]');
   const previous=read(args[1]),original=read(path.join(path.dirname(args[1]),'executed-manifest.json')),h1aManifest=original.h1aManifest,electron=read(path.join(root,'qa/integration-candidate/runtime/admission.json'));
-  const manifest={schema:1,purpose:'H2_REAL_ELECTRON_CONTROLS_ONLY',allowedCanonCalls:allowed,sourceCommit:sourceCommit(),h1aManifest,h1Result:{path:fs.realpathSync(args[1]),sha256:hash(args[1])},gpuReview:{path:fs.realpathSync(args[3]),sha256:hash(args[3])},sourceHashes:sourceHashes(),electron:{path:electron.binary.path,sha256:electron.binary.sha256,version:electron.version,files:hashes(path.dirname(electron.binary.path))},abiEvidence:['docs/HARDWARE_ABI_QUALIFICATION.md','docs/H2_NATIVE_BOUNDARY.md'].map(file=>({path:file,sha256:hash(path.join(root,file))}))};
+  const manifest={schema:1,purpose:'H2_REAL_ELECTRON_CONTROLS_ONLY',stageScope:focusOnly?'FOCUS_ONLY':'FULL',...(focusOnly?{previousH2Result}:{}),allowedCanonCalls:allowed,sourceCommit:sourceCommit(),h1aManifest,h1Result:{path:fs.realpathSync(args[1]),sha256:hash(args[1])},gpuReview:{path:fs.realpathSync(args[3]),sha256:hash(args[3])},sourceHashes:sourceHashes(),electron:{path:electron.binary.path,sha256:electron.binary.sha256,version:electron.version,files:hashes(path.dirname(electron.binary.path))},abiEvidence:['docs/HARDWARE_ABI_QUALIFICATION.md','docs/H2_NATIVE_BOUNDARY.md'].map(file=>({path:file,sha256:hash(path.join(root,file))}))};
   const admission=validate(manifest);const output=path.join(root,'qa/native-hardware/h2-manifest-'+crypto.randomUUID()+'.json');fs.mkdirSync(path.dirname(output),{recursive:true});fs.writeFileSync(output,JSON.stringify(manifest,null,2)+'\n',{flag:'wx'});
   console.log(JSON.stringify({manifest:output,sha256:hash(output),ready:admission.ready,nativeLoaded:false,authorization:'NOT_GRANTED'}));
 }
@@ -55,8 +62,8 @@ async function execute(manifest,manifestFile,admission){
   for(const name of ['USERPROFILE','APPDATA','LOCALAPPDATA'])env[name]=path.join(output,'environment',name);
   const at=new Date().toISOString();write(path.join(output,'profile/library.json'),{version:2,sessionId:'h2-empty-session',sessions:[{id:'h2-empty-session',name:'H2 controls-only validation',captureFolder:path.join(output,'photos'),created:at,updated:at,presetQueue:[]}],photos:[],presets:[],settings:{language:'en-US',theme:'light',showSplashes:false,performanceMode:true,autoSelect:false,focusPreviewOnSuccess:false,liveHistogramEnabled:false,captureFolder:path.join(output,'photos'),watchFolder:'',sdkDir:path.dirname(admission.dll.path),onboarding:{completed:true,step:'ready'}}});
   write(controlPath,{nonce,ticket:0,phase:'snapshot'});
-  write(configPath,{controlPath,kind:'H2_REAL_ELECTRON_CONTROLS_ONLY',output,nonce,gate,runtime:{path:admission.dll.path,sha256:admission.dll.sha256},addon:{path:admission.addon.path,sha256:admission.addon.sha256},sourceHashes:manifest.sourceHashes});
-  const summary={mode:'H2_NATIVE_REAL_ELECTRON',output,sourceCommit:manifest.sourceCommit,manifest:manifestFile,manifestSha256:hash(manifestFile),runtimeSha256:admission.dll.sha256,nativeResult:'BLOCKED',nativeLoaded:false,ready:true,blockers:[],allowedCanonCalls:allowed};
+  write(configPath,{stageScope:manifest.stageScope,controlPath,kind:'H2_REAL_ELECTRON_CONTROLS_ONLY',output,nonce,gate,runtime:{path:admission.dll.path,sha256:admission.dll.sha256},addon:{path:admission.addon.path,sha256:admission.addon.sha256},sourceHashes:manifest.sourceHashes});
+  const summary={mode:'H2_NATIVE_REAL_ELECTRON',stageScope:manifest.stageScope,output,sourceCommit:manifest.sourceCommit,manifest:manifestFile,manifestSha256:hash(manifestFile),runtimeSha256:admission.dll.sha256,nativeResult:'BLOCKED',nativeLoaded:false,ready:true,blockers:[],allowedCanonCalls:allowed};
   write(path.join(output,'executed-manifest.json'),manifest);write(path.join(output,'admission.json'),summary);
   const powershell=path.join(system,'System32/WindowsPowerShell/v1.0/powershell.exe');
   const {startSupervisor}=require('../native-n1/job-control.cjs'),{superviseChild}=require('../native-n1/supervised-process.cjs');
@@ -109,7 +116,7 @@ async function execute(manifest,manifestFile,admission){
     summary.electron=await app.evaluate(()=>globalThis.__h2.info());if(summary.electron.versions.electron!==manifest.electron.version)throw Error('H2_ACTUAL_ELECTRON_VERSION_MISMATCH');
     summary.seriesStartedUtc=new Date().toISOString();
     diagnosticTimer=setTimeout(()=>{summary.seriesDeadlineExceeded=true;void supervisor.request('terminateTree').catch(()=>{});},40000);
-    summary.stages=await require('./h2-stages.cjs').runStages({app,page,output,nonce,controlPath,record:row=>fs.appendFileSync(path.join(output,'preload-rpc.jsonl'),JSON.stringify({atUtc:new Date().toISOString(),...row})+'\n')});
+    summary.stages=await require('./h2-stages.cjs').runStages({app,page,output,nonce,controlPath,stageScope:manifest.stageScope,record:row=>fs.appendFileSync(path.join(output,'preload-rpc.jsonl'),JSON.stringify({atUtc:new Date().toISOString(),...row})+'\n')});
     write(path.join(output,'h2-stage-results.json'),summary.stages);
     summary.beforeClose=await app.evaluate(()=>globalThis.__h2.info());
     if(summary.stages.live){const l=summary.stages.live,frames=l.frames,last=l.samples.at(-1);l.receivedFps=frames.count>1&&frames.last.at>frames.first.at?(frames.count-1)*1000/(frames.last.at-frames.first.at):null;l.decodedFps=last.at>l.first.at?(last.frames-l.first.frames)*1000/(last.at-l.first.at):null;l.approxTransportLatencyMs=Number.isFinite(summary.beforeClose.observations.frames.first?.workerAt)?frames.first.at-summary.beforeClose.observations.frames.first.workerAt:null;write(path.join(output,'h2-stage-results.json'),summary.stages);}
@@ -166,8 +173,17 @@ async function main(){
   const manifestFile=args.shift(),executeMode=mode==='--execute';if(!path.isAbsolute(manifestFile||'')||args.join(' ')!==(executeMode?approvals:''))throw Error('H2_EXPLICIT_AUTHORIZATION_REQUIRED');
   if(fs.existsSync(manifestFile+'.used'))throw Error('H2_MANIFEST_ATTEMPT_ALREADY_CONSUMED');
   const manifest=read(manifestFile),admission=validate(manifest,{execute:executeMode});
-  if(!executeMode){console.log(JSON.stringify({mode:'H2_ADMISSION_DRY_RUN',ready:admission.ready,blockers:admission.blockers,manifestSha256:hash(manifestFile),runtimeSha256:admission.dll.sha256,nativeLoaded:false,electronLaunched:false,authorization:'NOT_GRANTED'},null,2));return;}
+  if(!executeMode){console.log(JSON.stringify({mode:'H2_ADMISSION_DRY_RUN',stageScope:manifest.stageScope,ready:admission.ready,blockers:admission.blockers,manifestSha256:hash(manifestFile),runtimeSha256:admission.dll.sha256,nativeLoaded:false,electronLaunched:false,authorization:'NOT_GRANTED'},null,2));return;}
   await execute(manifest,manifestFile,admission);
 }
 if(require.main===module)main().catch(error=>{console.error(String(error.stack||error));process.exitCode=2;});
-module.exports={main,validate,allowed,sourceHashes,moduleObservations};
+function qualifyPreviousH2(previous){
+  const s=previous?.stages,exposure=s?.exposure,live=s?.live;
+  if((previous?.stageScope??'FULL')!=='FULL')throw Error('H2_PREVIOUS_FULL_SCOPE_REQUIRED');
+  if(previous?.nativeResult!=='UNKNOWN'||previous.process?.disposition!=='CLEAN_EXIT'||previous.supervisorShutdown?.result?.processTreeExitConfirmed!==true||previous.process.jobStatus?.activeProcesses!==0||previous.nativeCleanup?.ownershipBalanced!==true||previous.nativeCleanup?.comBalanced!==true||previous.nativeCleanup.callbackTrampolinesAllocated!==previous.nativeCleanup.callbackTrampolinesReleased||previous.nativeExceptions?.length||previous.unmatchedNativeCalls?.length||previous.unexpectedNativeCodes?.length||previous.worker?.denials?.length||previous.modules?.unexpectedLocations?.length||previous.after?.ready!==true||previous.observerStop?.ready!==true)throw Error('H2_PREVIOUS_CLEAN_EVIDENCE_REQUIRED');
+  if((previous.worker?.counts?.EdsSendCommand??0)!==0||s?.af!==null||s?.lens?.length!==0||!String(s?.error).includes('H2_STATE_CHANGED_BEFORE_AF'))throw Error('H2_PREVIOUS_FOCUS_MUST_NOT_HAVE_RUN');
+  if(!Array.isArray(exposure)||exposure.length!==3||!['iso','shutter','aperture'].every(key=>exposure.some(row=>row.key===key&&row.status==='CHANGED_READBACK_RESTORED'&&row.descriptorCode===0&&row.initial===row.restored&&row.target===row.readBack&&row.target!==row.initial&&row.allowed?.includes(row.initial)&&row.allowed.includes(row.target))))throw Error('H2_PREVIOUS_EXPOSURE_NOT_VERIFIED');
+  if(!live||!Number.isInteger(live.first?.width)||live.first.width<1||!Number.isInteger(live.first?.height)||live.first.height<1||live.samples?.length!==10||!Number.isFinite(live.samples.at(-1).at-live.first.at)||live.samples.at(-1).at-live.first.at<5000||!Number.isInteger(live.frames?.count)||live.frames.count<2||live.histogram?.paths!==4||live.histogram.off!==true||![0x500,0x501,0xb].every(id=>s.afterLiveRaw?.[id]===s.initialRaw?.[id]&&Number.isInteger(s.initialRaw?.[id])))throw Error('H2_PREVIOUS_LIVE_NOT_VERIFIED');
+  return {exposure:'VERIFIED_IN_PINNED_ORIGINAL',live:'VERIFIED_IN_PINNED_ORIGINAL',focus:'NOT_EXECUTED',aggregatePreserved:previous.nativeResult};
+}
+module.exports={main,validate,allowed,sourceHashes,moduleObservations,qualifyPreviousH2};

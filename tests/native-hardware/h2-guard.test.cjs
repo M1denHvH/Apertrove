@@ -1,12 +1,12 @@
 'use strict';
 // All native symbols below are JavaScript fakes; VM supplies opaque pointer predicates.
 const test=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path'),vm=require('node:vm');
-function fixture(){
+function fixture({stageScope='FULL'}={}){
   const pointers=new WeakSet(),ptr=()=>{const p={opaque:true};pointers.add(p);return p;},calls=[],values=new Map([[0x402,88],[0x405,80],[0x406,123],[0x500,0],[0x501,0],[0xb,2]]);
   let control={nonce:'test',ticket:0,phase:'snapshot'},busy=null,throwName=null;const runtimePath=path.resolve('synthetic/EDSDK.dll');
   const koffi={load:file=>({unload:()=>{},func:(...signature)=>{const name=signature.length===1?signature[0].match(/([A-Za-z_]\w*)\s*\(/)[1]:signature[1];return(...args)=>{calls.push({name,args});if(name===throwName)throw Error('synthetic binding throw');if(name===busy)return 0x81;if(name==='EdsGetPropertyData')args[4].writeUInt32LE(values.get(args[1])??0);if(name==='EdsGetPropertyDesc')Object.assign(args[2],{form:0,access:0,count:3,values:[80,88,96]});if(['EdsGetCameraList','EdsGetChildAtIndex'].includes(name))args.at(-1)[0]=ptr();if(['EdsCreateMemoryStream','EdsCreateEvfImageRef','EdsGetPointer'].includes(name))args[1][0]=ptr();if(name==='EdsGetLength'||name==='EdsGetPosition')args[1][0]=100n;return 0;};}}),register:fn=>fn,unregister:()=>{}};
   const sandbox={module:{exports:{}},require:name=>name==='node:util'?{types:{isExternal:value=>pointers.has(value)}}:require(name),process,Buffer,Date,Map,Set,WeakMap,Proxy};vm.runInNewContext(fs.readFileSync(path.join(__dirname,'h2-guard.cjs'),'utf8'),sandbox);
-  const guard=sandbox.module.exports.createGuard({koffi,runtimePath,nonce:'test',readControl:()=>control});
+  const guard=sandbox.module.exports.createGuard({koffi,runtimePath,nonce:'test',readControl:()=>control,stageScope});
   const lib=guard.koffi.load(runtimePath),fn=name=>lib.func('__stdcall',name,'uint32',[]),get=id=>{const b=Buffer.alloc(4);fn('EdsGetPropertyData')(null,id,0,4,b);return b.readUInt32LE();},desc=id=>fn('EdsGetPropertyDesc')(null,id,{}),write=(id,value)=>{const b=Buffer.alloc(4);b.writeUInt32LE(value);return fn('EdsSetPropertyData')(null,id,0,4,b);};
   let camera;const activate=()=>{const l=[null],c=[null];fn('EdsGetCameraList')(l);fn('EdsGetChildAtIndex')(l[0],0,c);camera=c[0];fn('EdsOpenSession')(camera);for(const [id,value]of [[0x500,2],[0x501,1],[0x416,1],[0x404,0]]){values.set(id,value);get(id);}return camera;};
   return {guard,calls,fn,get,desc,write,activate,phase:(phase,extra={})=>{control={nonce:'test',ticket:control.ticket+1,phase,...extra};},busy:name=>{busy=name;},throws:name=>{throwName=name;}};
@@ -37,6 +37,25 @@ test('H2 binding exception stops series but permits precisely one owed AF OFF wi
 });
 test('H2 new tickets cannot repeat exposure or restoration for a property',()=>{
   const f=fixture();f.get(0x402);f.desc(0x402);f.phase('exposure',{write:{id:0x402,value:96}});f.write(0x402,96);f.phase('exposure',{write:{id:0x402,value:80}});assert.throws(()=>f.write(0x402,80),/one exposure\/restore attempt/);
+});
+test('FOCUS_ONLY denies every exposure target and restore even with valid descriptor and controller ticket',()=>{
+  for(const id of [0x402,0x405,0x406])for(const phase of ['exposure','restore']){const f=fixture({stageScope:'FOCUS_ONLY'}),initial=f.get(id);f.desc(id);f.phase(phase,{write:{id,value:phase==='restore'?initial:96}});const before=f.calls.length;assert.throws(()=>f.write(id,phase==='restore'?initial:96),/focus-only exposure mutation forbidden/);assert.equal(f.calls.length,before);}
+});
+test('post-stop qualification requires each scalar read after both EVF restoration acknowledgments',()=>{
+  const {postStopEvidence}=require('./h2-stages.cjs'),initial={1027:4,1028:2,1280:0,1281:1};
+  const read=(id,value)=>({phase:'after',name:'EdsGetPropertyData',result:0,atUtc:'2026-11-21T00:00:00Z',outputs:[null,id,0,4,{uint32:value}]}),write=(id,value)=>({...read(id,value),name:'EdsSetPropertyData'});
+  const stale=[read(1027,4),read(1028,2),write(1280,0),write(1281,1),read(1280,0),read(1281,1)];assert.equal(postStopEvidence(stale,initial).confirmed,false);
+  assert.equal(postStopEvidence([...stale,read(1028,2),read(1027,4)],initial).confirmed,true);assert.equal(postStopEvidence([...stale,read(1028,0),read(1027,4)],initial).confirmed,false);assert.equal(postStopEvidence([...stale,read(1028,2),read(1027,3)],initial).confirmed,false);
+});
+test('FOCUS_ONLY controller invokes one Live View start, AF, near/far, stop and disconnect without exposure or B measurement',async t=>{
+  const os=require('node:os'),folder=fs.mkdtempSync(path.join(os.tmpdir(),'apertrove-focus-scope-')),trace=path.join(folder,'native-trace.jsonl'),{runStages}=require('./h2-stages.cjs');t.after(()=>{for(const name of fs.readdirSync(folder))fs.unlinkSync(path.join(folder,name));fs.rmdirSync(folder);});
+  const scalar={1024:3,1026:88,1027:4,1029:80,1030:123,262:0,1028:2,1294:1,11:1,1280:0,1281:1},rows=[],calls=[];let stopWrites=0,readOnlyRefreshes=0;
+  const append=(id,value,name='EdsGetPropertyData')=>{rows.push({phase:'after',name,result:0,atUtc:new Date().toISOString(),outputs:[null,id,0,4,{uint32:value}]});fs.writeFileSync(trace,rows.map(row=>JSON.stringify(row)).join('\n')+'\n');};for(const [id,value]of Object.entries(scalar))append(Number(id),value);
+  const camera={model:'Canon EOS 2000D',connected:true,working:true,controlsOnly:true,saveTo:null,eventsRegistered:false,capabilities:{capture:false},mode:'M',equipment:{lensAttached:true},live:false,properties:Object.fromEntries([['iso',88],['shutter',123],['aperture',80],['whiteBalance',0],['meteringMode',4],['afMode',2],['liveAfMode',1]].map(([key,value])=>[key,{value}]))};
+  const page={evaluate:async(_fn,payload)=>{if(!payload?.method)return;const {method,args}=payload;calls.push([method,args]);if(method==='boot')return {camera:structuredClone(camera)};if(method==='cameraWorking')return structuredClone(camera);if(method==='live'){const wasLive=camera.live;camera.live=args.enabled;if(args.enabled){append(1280,2);append(1281,1);}else{if(wasLive){stopWrites+=2;append(1280,0,'EdsSetPropertyData');append(1281,1,'EdsSetPropertyData');camera.properties.afMode.value=0;camera.properties.meteringMode.value=3;}else{readOnlyRefreshes++;camera.properties.afMode.value=2;camera.properties.meteringMode.value=4;}for(const [id,value]of Object.entries(scalar))append(Number(id),Number(id)===1028?camera.properties.afMode.value:Number(id)===1027?camera.properties.meteringMode.value:value);}return structuredClone(camera);}if(method==='autofocus')return {status:'unverified',confirmed:false};if(method==='focus')return args;if(method==='disconnect'){camera.connected=false;return camera;}throw Error('UNEXPECTED_SCOPE_RPC '+method);},locator:()=>({getByRole:()=>({click:async()=>{}}),evaluate:async()=>({at:Date.now(),width:1056,height:704,decodedFrames:1})}),waitForFunction:async()=>{}};
+  const result=await runStages({page,output:folder,nonce:'synthetic',controlPath:path.join(folder,'control.json'),record:()=>{},stageScope:'FOCUS_ONLY'});
+  assert.equal(result.completed,true,result.error);assert.equal(result.exposure.length,0);assert.equal(result.live,null);assert.equal(result.finalReadback.confirmed,true);assert.equal(result.finalReadback.samples.length,2);assert.equal(stopWrites,2);assert.equal(readOnlyRefreshes,1);
+  assert.deepEqual(calls.filter(([method])=>['property','live','autofocus','focus','disconnect'].includes(method)).map(([method,args])=>method==='live'?'live:'+args.enabled:method==='focus'?'focus:'+args.direction:method),['live:true','autofocus','focus:near','focus:far','live:false','live:false','disconnect']);
 });
 test('H2 rejects a different SDK camera model before any property or Live View mutation',async()=>{
   const calls=[],camera={connected:true,working:true,controlsOnly:true,model:'Different Canon camera',saveTo:null,eventsRegistered:false,capabilities:{capture:false}},files=new Map();

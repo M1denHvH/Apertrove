@@ -3,7 +3,8 @@
 const fs=require('node:fs'),path=require('node:path'),{types}=require('node:util');
 const allowed=Object.freeze(['EdsInitializeSDK','EdsTerminateSDK','EdsGetCameraList','EdsGetChildCount','EdsGetChildAtIndex','EdsGetDeviceInfo','EdsOpenSession','EdsCloseSession','EdsRelease','EdsGetPropertySize','EdsGetPropertyData','EdsGetPropertyDesc','EdsGetEvent','EdsSetPropertyData','EdsSendCommand','EdsCreateMemoryStream','EdsCreateEvfImageRef','EdsDownloadEvfImage','EdsGetPointer','EdsGetLength','EdsGetPosition','EdsSeek']);
 const exposureIds=[0x402,0x405,0x406],snapshotIds=[0x400,...exposureIds,0x407,0x106,0x107,0x404,0x416,0x50e,0x500,0x501,0xb];
-function createGuard({koffi,runtimePath,tracePath,controlPath,nonce,onViolation=()=>{},readControl}){
+function createGuard({koffi,runtimePath,tracePath,controlPath,nonce,stageScope='FULL',onViolation=()=>{},readControl}){
+  if(!['FULL','FOCUS_ONLY'].includes(stageScope))throw Error('H2_STAGE_SCOPE_INVALID');
   const counts=new Map(),denials=[],references=new WeakMap(),streams=new Set(),images=new Map(),owned=new Set(),usedTickets=new Set(),mutationBudgets=new Set(),snapshots={},descriptors={},records=[];let nextRef=0,downloadEpoch=0,current=null,stopped=false,lastTicket=0,camera=null,knownRestore=false,evfCycle=0;const evfRestores=new Set();
   const same=(a,b)=>path.resolve(a).toLowerCase()===path.resolve(b).toLowerCase();
   const control=()=>{const value=readControl?readControl():JSON.parse(fs.readFileSync(controlPath,'utf8'));if(value.nonce!==nonce||!Number.isInteger(value.ticket)||value.ticket<lastTicket)deny('control admission','invalid ticket');lastTicket=value.ticket;return value;};
@@ -16,6 +17,7 @@ function createGuard({koffi,runtimePath,tracePath,controlPath,nonce,onViolation=
     if(usedTickets.has(key))deny('duplicate mutation',name);
     if(name==='EdsSetPropertyData'){
       const id=args[1],value=args[4].readUInt32LE();
+      if(stageScope==='FOCUS_ONLY'&&exposureIds.includes(id))deny('focus-only exposure mutation forbidden',id);
       if(exposureIds.includes(id)){if(!c.write||c.write.id!==id||c.write.value!==value||!['exposure','restore'].includes(c.phase))deny('exposure ticket',id);const budget=c.phase+':'+id;if(mutationBudgets.has(budget))deny('one exposure/restore attempt',id);if(!Number.isInteger(snapshots[id]?.initial))deny('missing original exposure',id);if(c.phase==='restore'&&value!==snapshots[id].initial)deny('restore must equal original',id);if(c.phase==='exposure'&&(value===snapshots[id].initial||!descriptors[id]?.values?.map(v=>v>>>0).includes(value)))deny('descriptor target',id);mutationBudgets.add(budget);}
       else if([0x500,0x501].includes(id)){const original=snapshots[id]?.initial,start=c.phase==='live-start',restorePhase=['live-stop','cleanup','live','af','lens'].includes(c.phase),expected=start?(id===0x500?(original|2)>>>0:1):original;if(!Number.isInteger(original)||value!==expected||!start&&!restorePhase)deny('EVF restoration/value',value);if(start&&id===0x500)evfCycle++;if(!start){const debt=evfCycle+':'+id;if(!evfCycle||evfRestores.has(debt))deny('one original EVF restore per cycle',id);evfRestores.add(debt);}}
       else deny('property write',id);

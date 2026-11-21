@@ -10,7 +10,7 @@ for(const [name,digest] of Object.entries(config.sourceHashes))if(hash(path.join
 const trace=path.join(config.output,'native-trace.jsonl'),evidence=path.join(config.output,'native-worker.json');
 const rawLoad=Module._load,rawAddon=rawLoad.call(Module,config.addon.path,module,false);
 const {createGuard}=require('./h2-guard.cjs');
-const guard=createGuard({koffi:rawAddon,runtimePath:config.runtime.path,tracePath:trace,controlPath:config.controlPath,nonce:config.nonce,onViolation:value=>{fs.writeFileSync(path.join(config.output,'native-denial.json'),JSON.stringify(value));}});
+const guard=createGuard({koffi:rawAddon,runtimePath:config.runtime.path,tracePath:trace,controlPath:config.controlPath,nonce:config.nonce,stageScope:config.stageScope,onViolation:value=>{fs.writeFileSync(path.join(config.output,'native-denial.json'),JSON.stringify(value));}});
 Module._load=function(request,parent,isMain){
   if(request==='koffi')return guard.koffi;
   if(/\.node$/i.test(String(request)))throw Error('H2_UNEXPECTED_ADDON_LOAD');

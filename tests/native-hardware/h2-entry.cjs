@@ -7,6 +7,7 @@ const nonce=process.argv.find(arg=>arg.startsWith('--h2-nonce='))?.slice('--h2-n
 if(!configPath||!path.isAbsolute(configPath)||!/^[a-f0-9]{48}$/.test(nonce||''))throw Error('H2_ENTRY_ADMISSION_REQUIRED');
 const config=JSON.parse(fs.readFileSync(configPath,'utf8'));
 if(config.nonce!==nonce||config.kind!=='H2_REAL_ELECTRON_CONTROLS_ONLY'||process.env.NODE_OPTIONS||process.env.NODE_PATH||process.env.FOCAL_TEST_DATA!==path.join(config.output,'profile'))throw Error('H2_ENTRY_CONFIGURATION_MISMATCH');
+if(!['FULL','FOCUS_ONLY'].includes(config.stageScope))throw Error('H2_STAGE_SCOPE_INVALID');
 // Resolve every writable Electron location before its native startup can create children.
 const paths={userData:path.join(config.output,'profile'),sessionData:path.join(config.output,'chromium'),appData:path.join(config.output,'environment','APPDATA'),temp:path.join(config.output,'temp'),crashDumps:path.join(config.output,'crashes')};
 for(const [key,value]of Object.entries(paths)){fs.mkdirSync(value,{recursive:true});app.setPath(key,value);}
@@ -32,7 +33,7 @@ ipcMain.handle=(channel,handler)=>rawHandle(channel,async(event,args)=>{
   if(method==='settings'&&(Object.keys(args||{}).length!==1||typeof args.liveHistogramEnabled!=='boolean'))return deny('isolated histogram setting only',method);
   if(method==='autofocus'&&(args?.preview!==false||observations.ipc.filter(item=>item.method===method).length>1))return deny('one AF attempt',method);
   if(method==='focus'&&(!['near','far'].includes(args?.direction)||args?.step!==1))return deny('one small lens step',method);
-  if(method==='property'&&!['iso','aperture','shutter'].includes(args?.key))return deny('exposure only',method);
+  if(method==='property'&&(config.stageScope==='FOCUS_ONLY'||!['iso','aperture','shutter'].includes(args?.key)))return deny('exposure outside admitted scope',method);
   if(method==='window'&&args?.action!=='close')return deny('window action',args?.action);
   return handler(event,args);
 });
