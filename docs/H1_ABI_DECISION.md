@@ -21,7 +21,7 @@
 
 H1 permits discovery/device info, one session, bounded property size/type/data/descriptor reads and cleanup. It does not register Canon handlers, write properties or SaveTo/Capacity, download/cancel, start EVF, focus or release the shutter. `EdsGetVolumeInfo` remains excluded because its layout is not qualified.
 
-The H1 launcher exited `2147483651` (`0x80000003`) before Job assignment and the production-main grant. No native worker, API trace or camera report was produced. This is **BLOCKED before SDK execution**, not a native compatibility failure or a successful H1. A cause-specific correction, safe verification and renewed user approval are required before another real attempt. No automatic retry is authorized.
+The H1 launcher exited `2147483651` (`0x80000003`) before Job assignment and the production-main grant. No native worker, API trace or camera report was produced. This is **BLOCKED before SDK execution**, not a native compatibility failure or a successful H1. Later synthetic-only probes justified an early isolated-path setup and synchronous admission gate to prevent Chromium children preceding Job assignment; all four observed processes were contained and exited in the corrected probe. The original breakpoint cause remains unknown. The actual corrected H1 route still needs one newly authorized attempt; no automatic retry is authorized.
 
 ## Attribution and limits
 
