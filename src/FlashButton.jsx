@@ -3,7 +3,7 @@ import React,{useEffect,useState} from 'react';
 import {Zap} from 'lucide-react';
 export default function FlashButton({camera,busy,onPopup}){
   const [support,setSupport]=useState(null);
-  useEffect(()=>{let alive=true;setSupport(null);if(camera.connected)window.focal.flashSupport().then(result=>{if(alive)setSupport(result);}).catch(error=>{if(alive)setSupport({available:null,canAttempt:true,error:error.message});});return()=>{alive=false;};},[camera.connected,camera.cameraId,camera.model,camera.mode,camera.connectedAt]);
+  useEffect(()=>{let alive=true;setSupport(null);if(camera.connected)window.focal.flashSupport().then(result=>{if(alive)setSupport(result);}).catch(error=>{if(alive)setSupport({available:false,canAttempt:false,error:error.message});});return()=>{alive=false;};},[camera.connected,camera.cameraId,camera.model,camera.mode,camera.connectedAt]);
   const enabled=support?.available||support?.canAttempt;
   return <button className="btn flash-popup" aria-label={t("flashButton.raise_the_built_in_flash")} title={enabled?t("flashButton.raise_the_built_in_flash"):legacy(support?.error)||t("flashButton.built_in_flash_unavailable")} disabled={!camera.connected||!enabled||busy} onClick={onPopup}><Zap size={15}/>{busy==='flash'?t("flashButton.raising_flash"):t("flashButton.raise_flash")}</button>;
 }

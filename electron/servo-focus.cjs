@@ -1,0 +1,82 @@
+// AFMode readback establishes the selected mode. An accepted held AF command
+// establishes command ownership, never acquisition or optical tracking success.
+const { PROPS } = require('./camera-values.cjs');
+function createServoFocus(io) {
+  let state = { enabled:false, status:'off', confirmation:'command-accepted', trackingConfirmed:false };
+  let restoreMode, command, owedStop = false, changing = false;
+  const publish = patch => { state = { ...state, ...patch, trackingConfirmed:false }; io.onState?.({ ...state }); return { ...state }; };
+  const busy = () => changing || owedStop;
+  function stop() {
+    if (changing) throw Error('Дождитесь переключения AI Servo.');
+    if (!owedStop) return { ...state };
+    publish({ status:'stopping' });
+    try { io.command(command, 0, 'Остановка AI Servo'); }
+    catch (error) {
+      publish({ enabled:null, status:'error', confirmation:'unknown', error:error.message });
+      io.onUnknown?.(error);
+      throw error;
+    }
+    owedStop = false;
+    try {
+      // A physical mode change takes priority over the saved setting.
+      if (restoreMode !== undefined && io.get(PROPS.afMode) === 1) {
+        io.set(PROPS.afMode, restoreMode);
+        if (io.get(PROPS.afMode) !== restoreMode) throw Error('Камера не подтвердила восстановление режима AF.');
+      }
+      restoreMode = undefined;
+      return publish({ enabled:false, status:'off', confirmation:'command-accepted', error:undefined });
+    } catch (error) {
+      restoreMode = undefined;
+      publish({ enabled:false, status:'error', confirmation:'command-accepted', error:error.message });
+      throw error;
+    }
+  }
+  function set({ enabled } = {}) {
+    if (typeof enabled !== 'boolean') throw Error('Некорректное состояние AI Servo.');
+    if (!enabled) return stop();
+    if (changing) throw Error('Дождитесь переключения AI Servo.');
+    if (owedStop) {
+      if (state.enabled === true) return { ...state };
+      throw Error('Остановка AI Servo не подтверждена. Отключите камеру.');
+    }
+    io.ensure();
+    if (io.isCapturing?.() || io.isBusy?.()) throw Error('Дождитесь завершения текущей команды камеры.');
+    if (io.canFocus?.() === false) throw Error('Объектив в MF. Переведите его переключатель в AF.');
+    if (io.requiresLiveFocus?.() && !io.isLive()) throw Error('Для AI Servo включите Live View.');
+    const original = io.get(PROPS.afMode), property = io.refresh().properties?.afMode;
+    if (![0,1,2].includes(original)) throw Error('Камера не предоставила доступный режим AF.');
+    if (original !== 1 && (!property?.writable || !property.allowed?.includes(1))) throw Error('AI Servo недоступен в текущем режиме камеры.');
+    changing = true;
+    publish({ status:'starting', enabled:false, confirmation:'unknown', error:undefined });
+    try {
+      if (original !== 1) {
+        restoreMode = original;
+        io.set(PROPS.afMode, 1);
+      }
+      if (io.get(PROPS.afMode) !== 1) throw Error('Камера не подтвердила AI Servo.');
+      command = io.isLive() ? 0x102 : 4;
+      // The release is owed even when a binding throws after native dispatch.
+      owedStop = true;
+      io.command(command, 1, 'Запуск AI Servo');
+      return publish({ enabled:true, status:'running', confirmation:'command-accepted', method:command === 4 ? 'viewfinder' : 'live' });
+    } catch (error) {
+      changing = false;
+      if (owedStop) {
+        try { stop(); } catch (releaseError) { throw releaseError; }
+      } else if (restoreMode !== undefined) {
+        try { io.set(PROPS.afMode, restoreMode); if (io.get(PROPS.afMode) !== restoreMode) throw Error('Камера не подтвердила восстановление режима AF.'); }
+        catch (restoreError) { error = restoreError; }
+        finally { restoreMode = undefined; }
+      }
+      publish({ enabled:false, status:'error', confirmation:'command-accepted', error:error.message });
+      throw error;
+    } finally { changing = false; }
+  }
+  function disconnected() {
+    const unknown = owedStop;
+    owedStop = false; restoreMode = undefined; changing = false;
+    return publish({ enabled:unknown ? null : false, status:'disconnected', confirmation:unknown ? 'unknown' : 'command-accepted', error:unknown ? 'Соединение потеряно до подтверждения остановки AI Servo.' : undefined });
+  }
+  return { set, stop, disconnected, isBusy:busy, snapshot:() => ({ ...state }) };
+}
+module.exports = { createServoFocus };

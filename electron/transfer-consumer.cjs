@@ -10,11 +10,13 @@ function createTransferConsumer({generation,register,onIssue=()=>{}}){
     if(!data||typeof data.path!=='string'||!data.path){issue('TRANSFER_FILE_MISSING');return Promise.resolve();}
     const id=typeof context?.transferId==='string'?context.transferId:null;
     const prior=id&&recent.get(id);
-    if(prior&&prior.path===data.path&&prior.sequence===sequence){duplicates++;return Promise.resolve();}
-    if(prior)issue('TRANSFER_ID_COLLISION');
-    if(id){recent.set(id,{path:data.path,sequence});while(recent.size>128)recent.delete(recent.keys().next().value);}
+    const replay=prior&&prior.path===data.path&&prior.sequence===sequence;
+    if(replay&&prior.status!=='FAILED'){duplicates++;return prior.job||Promise.resolve();}
+    if(prior&&!replay)issue('TRANSFER_ID_COLLISION');
+    const entry={path:data.path,sequence,status:'PENDING',job:null};
+    if(id){recent.set(id,entry);while(recent.size>128){const removable=[...recent].find(([,item])=>item.status!=='PENDING');if(!removable)break;recent.delete(removable[0]);}}
     if(!Number.isSafeInteger(sequence)||sequence<1)issue('PHOTO_SEQUENCE_INVALID');
-    else if(sequence<=frontier||holes.has(sequence))issue('PHOTO_SEQUENCE_REUSED');
+    else if(!replay&&(sequence<=frontier||holes.has(sequence)))issue('PHOTO_SEQUENCE_REUSED');
     else if(sequence>frontier){
       holes.add(sequence);while(holes.delete(frontier+1))frontier++;
       if(holes.size>256){issue('PHOTO_SEQUENCE_GAP_BUDGET');holes.clear();}
@@ -24,12 +26,13 @@ function createTransferConsumer({generation,register,onIssue=()=>{}}){
     const frozen=JSON.parse(JSON.stringify(context||{sessionId:null,operationId:null,captureId:null,attribution:'AMBIGUOUS',correlation:'UNCONFIRMED'}));
     // SDK callbacks have no confirmed app capture key. Never inherit new globals.
     if(frozen.correlation!=='CONFIRMED'){frozen.operationId=null;frozen.captureId=null;delete frozen.series;delete frozen.burst;}
-    accepted++;
+    if(!replay)accepted++;
     const job=Promise.resolve().then(()=>register(data.path,frozen,data.capture===true)).then(result=>{
-      if(result?.errors?.length)issue('TRANSFER_REGISTRATION_FAILED');
-      else committed++;
+      if(result?.errors?.length){entry.status='FAILED';issue('TRANSFER_REGISTRATION_FAILED');}
+      else{entry.status='COMMITTED';committed++;}
       return result;
-    },()=>{issue('TRANSFER_REGISTRATION_FAILED');});
+    },()=>{entry.status='FAILED';issue('TRANSFER_REGISTRATION_FAILED');});
+    entry.job=job;
     pending.add(job);job.then(()=>pending.delete(job),()=>pending.delete(job));return job;
   }
   function fence(sequence){

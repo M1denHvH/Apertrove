@@ -1,0 +1,13 @@
+.servo-control{margin-top:10px}
+.servo-toggle{width:100%;justify-content:center}
+.camera-operation-note{margin-top:6px;font-size:10px;line-height:1.5;color:var(--readable-secondary);overflow-wrap:anywhere}
+.camera-operation-note.error{color:var(--error-text)}
+.bulb-control{margin-top:10px;padding:8px 0;border-top:1px solid var(--border)}
+.bulb-control-row,.bulb-status{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.bulb-mode{font-size:10px;font-weight:700;color:var(--text)}
+.bulb-control-row .btn{min-height:30px;padding:6px 8px;font-size:10px;margin:0}
+.bulb-status{margin-top:6px;font-size:10px;line-height:1.5;color:var(--readable-secondary);flex-wrap:wrap}
+.bulb-status output{font-variant-numeric:tabular-nums;color:var(--text)}
+.photo-session-association{display:grid;gap:6px;margin-top:14px}
+.photo-session-association>span{font-size:10px;font-weight:700;color:var(--text)}
+.photo-session-association .ui-select{width:100%}

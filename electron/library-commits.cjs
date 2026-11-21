@@ -18,6 +18,19 @@ function createLibraryCommitter({getStore,writeSnapshot,isReady}){
   return {
     runExclusive,
     persist:()=>runExclusive(()=>writeSnapshot(snapshot())),
+    updatePhoto(id,patch){
+      let staged;try{staged=copy(patch);}catch(error){return Promise.reject(error);}
+      return runExclusive(async()=>{
+        const live=getStore(),photo=live.photos.find(item=>item.id===id);
+        if(!photo)throw invalid('The photo no longer exists.');
+        const candidate=snapshot(),next=candidate.photos.find(item=>item.id===id);
+        Object.assign(next,staged);
+        if(validateLibrary(candidate).kind!=='VALID')throw invalid('The photo update would create an invalid library.');
+        await writeSnapshot(candidate);
+        Object.assign(photo,staged);
+        return photo;
+      });
+    },
     registerPhoto(record,{cameraTransfer=false}={}){
       // Freeze caller-owned staging before this operation can wait in the queue.
       let staged;try{staged=copy(record);}catch(error){return Promise.reject(error);}

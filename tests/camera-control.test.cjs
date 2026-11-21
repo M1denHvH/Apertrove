@@ -26,6 +26,11 @@ test('Read-only and unsupported values are blocked before any SDK write',async()
   const r=rig({refresh:()=>({properties:{aperture:{writable:false,allowed:[0x30]}}})});await assert.rejects(r.control.property({key:'aperture',value:0x30}),/недоступен/);assert.equal(r.writes.length,0);
   const t=rig();await assert.rejects(t.control.property({key:'shutter',value:0xffff}),/недоступен/);assert.equal(t.writes.length,0);
 });
+test('Bulb readback is labelled without offering a host property write or an ordinary shutter pulse',async()=>{
+  assert.equal(valueLabel('shutter',0x0c),'Bulb');
+  const r=rig({refresh:()=>({properties:{shutter:{writable:true,allowed:[0x0c]}}})});
+  await assert.rejects(r.control.property({key:'shutter',value:0x0c}),/BULB недоступен/);assert.deepEqual(r.writes,[]);
+});
 test('Manual focus uses DriveLensEvf 0x103 with all six near/far step encodings',async()=>{
   const r=rig();for(const direction of ['near','far'])for(const step of [1,2,3])await r.control.focus({direction,step});
   assert.deepEqual(r.commands,[[0x103,1],[0x103,2],[0x103,3],[0x103,0x8001],[0x103,0x8002],[0x103,0x8003]]);

@@ -43,7 +43,7 @@ function capabilityReport({ state, read, storage, exports, restricted, evidence 
   add(captureGroup, 'capture', 'Удалённая съёмка', restricted ? 'unsupported' : evidence.capture ? 'ready' : state.saveTo ? 'unknown' : 'temporary',
     restricted ? 'Canon предусматривает для этой модели импорт.' : evidence.capture ? 'Получен файл после команды съёмки.' : state.saveTo ? 'Назначение на ПК настроено. Спуск ещё не проверен.' : 'Нужно рабочее соединение с сохранением на ПК.');
   add(captureGroup, 'shutterPress', 'Полунажатие / полный спуск', restricted ? 'unsupported' : 'unknown', unknownCommand);
-  add(captureGroup, 'bulb', 'Удержание Bulb с заданной выдержкой', 'unimplemented', 'Программное управление длительностью Bulb требует отдельного управления затвором.');
+  add(captureGroup, 'bulb', 'BULB', 'unsupported', 'Протокол BULB этой камеры и версии SDK не квалифицирован. Команды старта, остановки и блокировки UI не отправляются.');
   add(captureGroup, 'interval', 'Интервал и таймер', restricted ? 'unsupported' : evidence.capture ? 'ready' : 'unknown', 'Интервал выполняет Apertrove. Таймер камеры определяется списком режимов протяжки.');
   add(captureGroup, 'captureEvents', 'Завершение съёмки', evidence.capture ? 'ready' : 'unknown', 'Ожидается передача файла, включая серию RAW + JPEG.');
   const evf = read(0x500);
@@ -56,6 +56,7 @@ function capabilityReport({ state, read, storage, exports, restricted, evidence 
     position.code ? `Чтение EVF Zoom Position · ${hex(position.code)}` : 'Координаты прочитаны. Их изменение требует проверки границ на конкретной модели.');
   const mf = state.properties.afMode?.value === 3;
   add(focusGroup, 'autofocus', 'Автофокус', restricted ? 'unsupported' : mf ? 'temporary' : evidence.autofocus ? 'ready' : 'unknown', mf ? 'Объектив в MF.' : unknownCommand);
+  add(focusGroup, 'servo', 'AI Servo', restricted ? 'unsupported' : state.capabilities?.servo ? 'unknown' : 'temporary', state.capabilities?.servo ? 'Режим AF подтверждается чтением. Принятая команда AF не подтверждает непрерывное оптическое слежение.' : 'Камера должна предоставить режим AI Servo для выбора или чтения.');
   add(focusGroup, 'driveLens', 'Электронная доводка фокуса', restricted ? 'unsupported' : mf || evf.code ? 'temporary' : evidence.driveLens ? 'ready' : 'unknown', mf ? 'Объектив в MF.' : 'Требуется совместимый объектив и доступный Live View.');
   const focus = read(0x104);
   add(focusGroup, 'focusInfo', 'Информация о точках фокуса', evidence.focusInfo ? 'ready' : readStatus(focus.code), focus.code ? `Чтение на камере · ${hex(focus.code)}. Данные могут появиться в EVF.` : 'Камера отдаёт блок FocusInfo.');

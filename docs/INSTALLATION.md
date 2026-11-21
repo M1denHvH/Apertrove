@@ -11,7 +11,7 @@
 
 3. Extract the whole ZIP to a folder you can write to. Open `Apertrove.exe` in the extracted application folder and keep its files and subfolders together. The portable app is unsigned, so Windows can show a reputation prompt. Follow your organization’s policy if Windows blocks it.
 
-The download is a published snapshot. The latest changes on `main` are available by [building from source](../README.md#develop). See [system requirements](REQUIREMENTS.md) for the tested Windows and Canon combinations.
+The download is a published snapshot. Build the source branch you want to evaluate by following [Development](DEVELOPMENT.md). See [system requirements](REQUIREMENTS.md) for the tested Windows and Canon combinations.
 
 ## Set up Apertrove without a camera
 
@@ -30,6 +30,6 @@ Apertrove looks in common Canon installation directories. In setup, use **Choose
 1. Exit EOS Utility and any other app that could be using the camera. Turn the camera on, use its USB connection mode if applicable, and plug it directly into the PC with a USB data cable.
 2. Open **Settings** → **Setup and diagnostics** → **Camera diagnostics**. Choose **Find cameras**, select the model, then select **Check capabilities**. This is a read-only camera check. For runtime problems, choose **Check SDK**.
 3. Finish diagnostics before opening a working camera connection. To connect from the main app, open **Choose camera** in the header and choose your camera. For the preview, open a session and go to **Capture**.
-4. The setup wizard’s shooting connection can also configure **Card and computer** or **Computer only**, subject to camera support. Real shutter and file handoff are still unqualified. Use [local file import](USER_GUIDE.md#sessions-and-library) for existing photos and keep a separate copy of any important originals.
+4. The setup wizard’s shooting connection can also configure **Card and computer** or **Computer only**, subject to camera support. Camera capture and file handoff need further physical validation; keep independent originals while evaluating them. Use [local file import](USER_GUIDE.md#import-review-and-export) for existing photos and keep a separate copy of any important originals.
 
-Back up your originals and local Apertrove profile before replacing a portable build. Older installations may use a Focal Studio profile. See [current camera support](REQUIREMENTS.md#camera-support) and [how to recover from a setup or library error](TROUBLESHOOTING.md).
+Back up your originals and local Apertrove profile before replacing a portable build. Older installations may use a Focal Studio profile. See [current camera support](COMPATIBILITY.md) and [how to recover from a setup or library error](TROUBLESHOOTING.md).

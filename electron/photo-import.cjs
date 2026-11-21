@@ -11,6 +11,9 @@ function createPhotoImporter({getStore,commits,extensions,uniquePath,buildPhoto,
   const notify=(callback,value)=>{try{callback(value);}catch{/* Notifications cannot undo an acknowledged registration. */}};
   function remember(hint,target){retained.delete(hint);retained.set(hint,target);while(retained.size>256)retained.delete(retained.keys().next().value);}
   async function addFiles(files,copy=true,context){
+    // Import may wait for codec/file/persistence work while the active session
+    // changes. The caller's delivery context owns this photo for the whole job.
+    context=JSON.parse(JSON.stringify(context));
     const result={added:0,skipped:0,errors:[]};const {sessionId,dest}=context;
     if(copy&&!dest)throw Error('Сначала выберите папку для снимков.');
     for(const source of files){
@@ -38,7 +41,8 @@ function createPhotoImporter({getStore,commits,extensions,uniquePath,buildPhoto,
         }
         stage='build';await beforeRead(target);
         const built=await buildPhoto(target);
-        const record={...built,fingerprint,sessionId:getStore().sessions.some(session=>session.id===sessionId)?sessionId:null,equipment:context.equipment,series:context.series||undefined,burst:context.burst||undefined,cameraTransfer:context.cameraTransfer||undefined,...(context.transfer?{transfer:context.transfer}:{})};
+        const record={...built,fingerprint,sessionId:sessionId??null,equipment:context.equipment,series:context.series||undefined,burst:context.burst||undefined,cameraTransfer:context.cameraTransfer||undefined,...(context.transfer?{transfer:context.transfer}:{}),
+          ...(sessionId&&!getStore().sessions.some(session=>session.id===sessionId)?{sessionAssociation:{status:'SESSION_REMOVED',sessionId}}:{})};
         stage='persist';const committed=await commits.registerPhoto(record,{cameraTransfer:!!context.cameraTransfer});
         if(hint)retained.delete(hint);
         if(!committed.added){result.skipped++;continue;}

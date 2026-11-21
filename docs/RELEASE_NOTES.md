@@ -1,12 +1,20 @@
-# Apertrove 0.10.3
+# Release notes
 
-The first public release candidate brings together tethered Canon EOS shooting, session folders, a photo library, a separate Shot Inspector window, Lighting Studio, and a phone browser remote.
+## Development changes after 0.10.3
 
-- Choose English, Russian, or the system language. Existing profiles without a saved language keep Russian.
-- Set a theme, visual style and accent during setup, and use Performance Mode to reduce decorative effects.
-- Use Live View composition guides, camera presets, and ordered preset series where the camera supports them.
-- Review camera transfers in Shot Inspector or inspect imported frames and metadata from the library.
+This source branch keeps version **0.10.3** and is not a new published release.
 
-The Windows x64 release is an unsigned portable ZIP. Canon EDSDK is obtained separately. Canon EOS 2000D over USB is the model with recorded hardware validation. The packaged candidate’s verification used an isolated profile without a physical camera or Canon SDK initialization. Apertrove does not currently provide direct Wi-Fi camera control, video recording, or software-controlled Bulb timing.
+- AI Servo uses a sustained command with explicit stop and unknown-state handling.
+- Live View has a compact, keyboard-accessible histogram toggle.
+- Camera-file delivery keeps session context and surfaces ambiguous association for review.
+- Photo session assignments can be corrected without moving originals.
+- Mechanical flash pop-up and dedicated BULB stay unavailable where no qualified protocol exists.
+- User guides, compatibility information and actual application screenshots have been refreshed.
 
-This release copy updates Electron and Sharp from the original 0.10.3 source snapshot. See the [changelog](../CHANGELOG.md), [installation](INSTALLATION.md), [requirements](REQUIREMENTS.md) and [license notices](../THIRD_PARTY_NOTICES.md).
+New camera behaviors have been exercised with fake providers. This does not establish physical operation on any additional camera. [Compatibility](COMPATIBILITY.md)
+
+## Published portable snapshot
+
+The published [0.10.3 archive](https://github.com/M1denHvH/Apertrove/releases/tag/Release) includes the desktop workspace, sessions, Library, Live View tools, Shot Inspector, Lighting Studio and LAN remote. It is a separate snapshot from later source changes.
+
+Use the checksum accompanying that release, keep the portable folder intact, and install Canon components separately. [Installation](INSTALLATION.md)

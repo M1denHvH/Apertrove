@@ -48,7 +48,7 @@ test('control-only writes are restricted to exposure and explicit EVF properties
 function evfRig({output=1,mode=0,restoreMismatch=false}={}){
   const values=new Map([[0x500,output],[0x501,mode]]),writes=[],events=[],failures=[],state={controlsOnly:true,capabilities:{liveView:true}};
   const context=load(section(worker,'function restoreLiveView()','\nfunction readFocus'),{
-    state,evfRestore:null,live:false,captureWait:null,controls:{isBusy:()=>false},ensureWorking:()=>{},
+    state,evfRestore:null,live:false,captureWait:null,controls:{isBusy:()=>false,stopServo:()=>{},isServoBusy:()=>false},ensureWorking:()=>{},
     get:id=>restoreMismatch&&context.evfRestore&&writes.length>=2?99:values.get(id),
     set:(id,value)=>{writes.push([id,value]);values.set(id,value);},status:()=>state,refresh:()=>state,releaseEvf:()=>{},
     performance:{now:()=>0},statsAt:0,statsFrames:0,statsBytes:0,teardownUncertain:false,currentOperation:null,
@@ -87,7 +87,7 @@ test('control-only Live View stop reads actual AF state after restore and keeps 
       get:id=>{const value=id===PROPS.afMode?(context.live?0:started?finalAF:2):(values.get(id)??0);actions.push({kind:'read',id,value});return value;},
       set:(id,value)=>{assert.notEqual(id,PROPS.afMode);actions.push({kind:'write',id,value});values.set(id,value);if(id===0x500&&(value&2))started=true;},
       readData:()=>null,textProperty:()=>'',sdk:{desc:(_camera,_id,out)=>{out.values=[0,1,2];out.count=3;return 0;}},
-      captureWait:null,controls:{isBusy:()=>false},ensureWorking:()=>{},releaseEvf:()=>actions.push({kind:'release'}),send:()=>{},
+      captureWait:null,controls:{isBusy:()=>false,stopServo:()=>{},isServoBusy:()=>false},ensureWorking:()=>{},releaseEvf:()=>actions.push({kind:'release'}),send:()=>{},
       performance:{now:()=>0},statsAt:0,statsFrames:0,statsBytes:0,teardownUncertain:false,currentOperation:null,observations:{failure:()=>{}},operationError:fault
     },['refresh','liveView','propertiesRestored']);
     // Both models start with AI Focus=2, then report One Shot=0 while EVF is on.

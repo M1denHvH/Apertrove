@@ -1,17 +1,27 @@
-# Contributing
+# Contributing to Apertrove
 
-Start with an issue describing the user-visible problem, camera model, connection and proposed behavior. Small, focused pull requests are easiest to review.
+Start with the user-visible problem: what you tried, what happened, and what you expected. A small focused change is easier to verify than an architectural rewrite.
 
-Use Windows x64 and Node.js 24. Run `npm ci`, `npm test`, `npm run build` and `npm run preflight`. `node tests/designs.cjs` checks the UI without opening a camera session. Tests that access real cameras are explicit opt-in scripts; do not run shutter-release tests without the owner's permission.
+## Set up and check
 
-Keep all SDK calls inside the isolated worker. Never expose native pointers to Electron renderers or use unowned native buffers. Preserve existing photo files and settings. Camera writes must be capability checked; focus commands need bounded completion and release in `finally`.
+Use Windows x64 and Node.js 24. Follow [Development](docs/DEVELOPMENT.md) for isolated profiles, commands and portable packaging. Before opening a pull request, run the relevant synthetic tests plus `npm test`, `npm run i18n:check`, `npm run build` and `npm run preflight`.
 
-Session destinations must remain fixed during an active capture job. Preset queues validate all steps, enforce single-shot drive and restore a snapshot even after cancellation/errors. Native burst tests require explicit permission and a bounded hold duration; a previous permission for two preset frames does not authorize additional bursts. Respect the hardware test budget files.
+A source review or fake-provider result does not qualify a physical camera. Do not run tests that change camera settings, move a lens, release the shutter, raise a flash or transfer camera files without the owner's explicit permission.
 
-Run `npm run i18n:check` for dictionary changes and `npm run i18n:ui` (with Microsoft Edge installed) to check the interface with a mocked camera worker. Equipment cards can load and cache product images from validated official URLs. Keep those images out of the repository and document any unverified specifications.
+## Keep the boundaries intact
 
-Do not commit EDSDK binaries, Canon headers/manuals, user libraries, photos, access keys or generated builds. Obtain the SDK separately from Canon. Describe hardware validation precisely: a test with one EOS model does not certify all SDK models.
+- Renderer commands go through preload and Electron main; EDSDK calls stay in the camera worker.
+- Validate arguments, use camera-reported choices and readback, and give active operations an explicit stop and cleanup path.
+- Keep captured delivery context and original files intact. Unknown correlation or completion must stay visible.
+- Preserve existing libraries, recovery evidence and test artifacts. Use new synthetic files and profiles for tests.
+- Never commit Canon binaries, proprietary headers/manuals, user libraries, photos, access keys or generated builds.
 
-The interface supports Russian and English. Use shared translation keys for user-facing text, add both translations, and keep saved values independent of language. New designs must work with light/dark/system themes, arbitrary accents, keyboard navigation and reduced motion. [Localization guide](docs/localization.md)
+See [Architecture](docs/ARCHITECTURE.md). New controls need tests for errors, repeated requests, disconnect and shutdown as well as the successful path.
 
-By contributing, you agree that your original contribution is distributed under the repository's MIT license. Third-party code and assets must retain their licenses.
+## Interface and documentation
+
+Use translation keys for user-facing messages and add both English and Russian. Keep saved values independent of language. Preserve the existing theme tokens and test light/dark themes, keyboard focus, arbitrary accents and reduced motion.
+
+Screenshots must come from the running application. Label simulated camera previews clearly and remove private paths, serial numbers and remote access links. User guides describe actions and current limits; internal validation history belongs outside the user navigation.
+
+By contributing original code, you agree to distribute it under the repository's MIT license. Retain third-party notices.

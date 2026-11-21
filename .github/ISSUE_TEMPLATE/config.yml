@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: User guide and troubleshooting
+    url: https://github.com/M1denHvH/Apertrove/blob/main/docs/USER_GUIDE.md
+    about: Check setup and supported workflows before reporting a problem.
+  - name: Report a vulnerability
+    url: https://github.com/M1denHvH/Apertrove/blob/main/SECURITY.md
+    about: Keep sensitive details out of public issues.

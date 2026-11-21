@@ -18,6 +18,7 @@ const {createTransferContexts}=require('./transfer-context.cjs');
 const {createTransferProducer}=require('./transfer-producer.cjs');
 const {createNativeObservations}=require('./native-observations.cjs');
 const {createSdkInitializationGate}=require('./sdk-initialization.cjs');
+const {createBulbControl}=require('./bulb-control.cjs');
 const parent = process.parentPort;
 const generation=process.argv.find(value=>value.startsWith('--apertrove-generation='))?.slice('--apertrove-generation='.length);
 if(typeof generation!=='string'||!/^[A-Za-z0-9._:-]{1,96}$/.test(generation)||!path.isAbsolute(process.env.APERTROVE_RECOVERY_DESTINATION||''))throw Error('Explicit worker generation and recovery destination required.');
@@ -89,6 +90,9 @@ function setDeliveryRoute({route,folder}={}){return transfers.setRoute({sessionE
 let focusSample={sequence:0,status:"unknown"},focusSampleAt=0;
 let evfStream=null,evfImage=null,statsAt=performance.now(),statsFrames=0,statsBytes=0,totalFrames=0,propertyRefreshPending=false;
 const state={connected:false,live:false,model:null,battery:null,properties:{},sdkPath:null,error:null};
+const bulb=createBulbControl({onState:value=>{state.bulb=value;status();}});
+state.bulb=bulb.snapshot();
+state.servo={enabled:false,status:'off',confirmation:'command-accepted',trackingConfirmed:false};
 const log = (level,message) => send({event:'log',data:{level,message,time:new Date().toISOString()}});
 const status = () => {
   state.live=live;
@@ -227,6 +231,9 @@ function refresh() {
     const allowed=code?[]:Array.from(desc.values||[]).slice(0,Math.max(0,Math.min(desc.count||0,128))).map(v=>v>>>0);
     state.properties[key]={value:current,allowed,choices:choices(key,allowed,current),descriptorCode:code,writable:!code&&allowed.length>0&&(!state.controlsOnly||['iso','shutter','aperture','compensation'].includes(key))&&!(key==='afMode'&&current===3&&!allowed.includes(3))};
   }
+  const af=state.properties.afMode;
+  state.capabilities={...state.capabilities,servo:!!state.working&&!restricted&&[0,1,2].includes(af?.value)&&(af.value===1||af.writable&&af.allowed.includes(1)),bulb:false};
+  if(controls.isServoBusy()&&state.servo.enabled===true&&af?.value!==1)controls.stopServo();
   return status();
 }
 function listCameras({sdkDir}={}){
@@ -319,11 +326,11 @@ async function connect({sdkDir,folder,cameraId,readOnly=false,controlsOnly=false
   if(camera){if(captureWait||controls.isBusy())throw Error('Дождитесь завершения текущей команды камеры.');await transferProducer.drain();disconnect();if(teardownUncertain)throw operationError('OPERATION_UNKNOWN_TERMINATION','Native session close is unverified.');}
   load(sdkDir);destination=folder;
   const items=listCameras({sdkDir});state.cameras=items;const selected=selectCamera(items,cameraId);
-  if(!selected){state.error='Камера не найдена. Подключите USB и включите камеру. Для EOS 2000D выключите Wi-Fi в меню камеры.';return status();}
+  if(!selected){state.error='Камера не найдена. Проверьте USB-кабель, питание и режим подключения. Закройте другие программы управления камерой.';return status();}
   let list=null;
   try {
     const out=[null];check(sdk.list(out),'Поиск камер');list=out[0];const count=[0];check(sdk.count(list,count),'Поиск камер');
-    if(!count[0]) {state.error='Камера не найдена. Подключите USB, включите камеру и выключите Wi-Fi в меню камеры.';return status();}
+    if(!count[0]) {state.error='Камера не найдена. Проверьте USB-кабель, питание и режим подключения. Закройте другие программы управления камерой.';return status();}
     for(let index=0;index<count[0];index++){
       const c=[null];check(sdk.child(list,index,c),'Выбор камеры');
       let keep=false;
@@ -350,6 +357,8 @@ function settleCapture(){
 }
 
 function disconnect() {
+  try{controls.stopServo();}catch(error){log('error',error.message);}
+  controls.servoDisconnected();bulb.disconnected();
   if(teardownUncertain)return status();
   sessionEpoch++;
   failCapture(Error('Съёмка прервана: камера отключена.'));
@@ -389,6 +398,7 @@ function restoreLiveView(){
 }
 function liveView({enabled}) {
   ensureWorking();
+  controls.stopServo();
   if(enabled&&state.capabilities?.liveView===false)throw Error('Live View недоступен в текущем режиме камеры.');
   if(captureWait||controls.isBusy())throw Error('Дождитесь завершения текущей команды камеры.');
   if(!!enabled===live)return state.controlsOnly&&!enabled&&!evfRestore?refresh():status();
@@ -499,6 +509,7 @@ function download(ref,folder,isCapture=false,context) {
 }
 function capture({autofocus=true,folder,burstMs=0,route,captureId},operation){
   ensureWorking();if(state.capabilities?.capture===false)throw Error(state.capabilities.reason||'Съёмка недоступна.');if(captureWait||controls.isBusy())throw Error('Предыдущая команда камеры ещё выполняется.');destination=folder||destination;
+  if(get(0x400)===4||get(PROPS.shutter)===0x0c)throw operationError('BULB_PROTOCOL_UNQUALIFIED','BULB недоступен: протокол этой камеры и версии SDK не квалифицирован.');
   if(burstMs&&(![1,4,5].includes(get(0x401))||burstMs<100||burstMs>5000))throw Error('Выберите доступный серийный режим камеры. Максимальное удержание — 5 секунд.');
   setDeliveryRoute({route,folder});transfers.noteCapture({operationId:operation.operationId,captureId,sessionEpoch});
   return new Promise((resolve,reject)=>{
@@ -528,6 +539,7 @@ async function listCard() {
   };try{walk(camera,0);evidence.card=true;return items;}catch(error){clearCard();throw error;}
 }
 const controls=createCameraControl({
+  onServo:value=>{state.servo=value;status();},onServoUnknown:error=>{send({event:'nativeObservation',data:{method:'EdsSendCommand',phase:'servo-release',classification:'UNKNOWN'}});log('error',error.message);},
   ensure:ensureWorking,refresh,get,set,log,previewFocus,pollFocus:readFocus,focusState:()=>focusSample,requiresLiveFocus:()=>!!state.controlsOnly,focusConfirmationAvailable:()=>!state.controlsOnly,onAutofocus:result=>{if(result.status==='focused')evidence.autofocus=true;state.autofocus={...result,at:Date.now()};if(result.status==='focusing')state.lastFocused=null;status();},canFocus:()=>state.controlsOnly?state.capabilities?.focus!==false&&get(0x416)===1&&[0,1,2].includes(get(0x404)):get(0x404)!==3,isCapturing:()=>!!captureWait,isLive:()=>live,
   command:(id,param,action)=>{
     ensure();
@@ -543,14 +555,15 @@ const controls=createCameraControl({
 const handlers={
   connect,disconnect:async()=>{await transferProducer.drain();const result=disconnect();if(teardownUncertain)throw operationError('OPERATION_UNKNOWN_TERMINATION','Native session close is unverified.');return result;},listCameras,sdkEnvironment,diagnoseCamera,destination:async({folder,route})=>{if(state.controlsOnly)throw operationError('OPERATION_ADMISSION_CLOSED','Передача файлов отключена для этого подключения.');if(captureWait||controls.isBusy())throw Error('Камера занята.');await transferProducer.drain();destination=folder;setDeliveryRoute({route,folder});return true;},status:()=>producersFenced||teardownUncertain?status():refresh(),live:liveView,capture,burstStop:stopBurst,
   property:controls.property,focus:async args=>{const result=await controls.focus(args);evidence.driveLens=true;return result;},autofocus:controls.autofocus,
+  servo:args=>controls.servo(args),servoStop:()=>controls.stopServo(),bulbStart:args=>bulb.start(args),bulbStop:()=>bulb.stop(),
   listCard,
   importCard:async({ids,folder,route},operation)=>{ensure();if(state.controlsOnly)throw operationError('OPERATION_ADMISSION_CLOSED','Передача файлов отключена для этого подключения.');const files=[],context=Object.freeze({sessionEpoch,sessionId:route?.sessionId??null,destination:folder,operationId:operation.operationId,captureId:null,operationType:'CARD_IMPORT',attribution:'EXPLICIT_IMPORT',correlation:'CONFIRMED'});for(const id of ids){operation.cancellation.throwIfRequested();const ref=cardRefs.get(id);if(!ref)throw Error('Список файлов устарел.');files.push(download(ref,folder,false,{...context,transferId:randomUUID()}));await new Promise(r=>setImmediate(r));}operation.cancellation.throwIfRequested();return files;},
-  producerFence:async()=>{operations.stopAdmission();await operations.whenIdle({exclusiveOnly:true});await transferProducer.drain();clearTimeout(timer);transferProducer.fence();producersFenced=true;return {drained:true,lastPhotoSequence:photoSequence,nativeStarted,proof:nativeStarted?'unknown':'native-not-started',transfers:transferProducer.snapshot()};},
+  producerFence:async()=>{operations.stopAdmission();await operations.whenIdle({exclusiveOnly:true});controls.stopServo();await bulb.shutdown();await transferProducer.drain();clearTimeout(timer);transferProducer.fence();producersFenced=true;return {drained:true,lastPhotoSequence:photoSequence,nativeStarted,proof:nativeStarted?'unknown':'native-not-started',transfers:transferProducer.snapshot()};},
   finalizeShutdown:async()=>{if(!producersFenced)throw operationError('OPERATION_ADMISSION_CLOSED','A producer fence is required before teardown.');shuttingDown=true;await transferProducer.drain();disconnect();await new Promise(resolve=>setImmediate(resolve));const released=releaseSdk();if(released&&com)observed('CoUninitialize','com-uninitialize',()=>com(),'void');send({event:'shutdown'});setTimeout(()=>process.exit(teardownUncertain?1:0),20);return {closed:true,lastPhotoSequence:photoSequence,nativeStarted,proof:nativeStarted?'unknown':'native-not-started',observations:observations.snapshot(),transfers:transferProducer.snapshot()};}
 };
-const operationHandlers=Object.fromEntries(Object.entries(handlers).map(([method,handler])=>[method,async(args,context)=>{const owned=!['status','burstStop','producerFence'].includes(method);if(owned)currentOperation={method,operationId:context.operationId};try{if(teardownUncertain&&!['status','burstStop','producerFence','finalizeShutdown'].includes(method))throw operationError('OPERATION_UNKNOWN_TERMINATION','Native teardown state is unverified.');return await handler(args,context);}finally{if(currentOperation?.operationId===context.operationId)currentOperation=null;}}]));
+const operationHandlers=Object.fromEntries(Object.entries(handlers).map(([method,handler])=>[method,async(args,context)=>{const owned=!['status','burstStop','servoStop','bulbStop','producerFence'].includes(method);if(owned)currentOperation={method,operationId:context.operationId};try{if(teardownUncertain&&!['status','burstStop','servoStop','bulbStop','producerFence','finalizeShutdown'].includes(method))throw operationError('OPERATION_UNKNOWN_TERMINATION','Native teardown state is unverified.');if(controls.isServoBusy()&&!['status','servoStop','bulbStop','servo','property','live','disconnect','producerFence','finalizeShutdown'].includes(method))throw operationError('OPERATION_BUSY','Остановите AI Servo перед другой командой камеры.');if(state.servo.enabled===null&&!['status','servoStop','disconnect','producerFence','finalizeShutdown'].includes(method))throw operationError('OPERATION_UNKNOWN_TERMINATION','Остановка AI Servo не подтверждена. Отключите камеру.');return await handler(args,context);}finally{if(currentOperation?.operationId===context.operationId)currentOperation=null;}}]));
 const operations=createOperationHost({generation,handlers:operationHandlers,send,getSessionEpoch:()=>sessionEpoch});
-async function receive(message) {if(shuttingDown)return;if(message?.type==='emergencyRelease'&&message.generation===generation){try{stopBurst();}catch{send({event:'transferIssue',data:{code:'EMERGENCY_RELEASE_UNKNOWN'}});}return;}await operations.receive(message);}
+async function receive(message) {if(shuttingDown)return;if(message?.type==='emergencyRelease'&&message.generation===generation){try{stopBurst();controls.stopServo();await bulb.stop();}catch{send({event:'transferIssue',data:{code:'EMERGENCY_RELEASE_UNKNOWN'}});}return;}await operations.receive(message);}
 if(parent)parent.on('message',({data})=>receive(data));else process.on('message',receive);
 setInterval(()=>{if(camera&&!producersFenced&&!teardownUncertain)try{refresh();}catch(e){log('error',e.message);}},2500).unref();
 send({event:'ready'});

@@ -3,23 +3,24 @@ import '../electron/remote/focus-overlay.js';
 import '../electron/remote/composition-overlay.js';
 import {histogramFromImageData,histogramPath,createLatestFrameProcessor} from '../electron/live-histogram.cjs';
 import React,{useEffect,useRef,useState} from 'react';
+import {ChartColumn} from 'lucide-react';
 
-function LiveHistogram({data,enabled,onToggle}){
+function LiveHistogram({data,enabled,onToggle,available=true}){
   return <div className="live-histogram-widget">
-    <div className="live-histogram-head"><span>{t("desktop.live_histogram")}</span><button type="button" className="canvas-chip" aria-pressed={enabled} onClick={()=>onToggle(!enabled)}>{enabled?t("desktop.live_histogram_on"):t("desktop.live_histogram_off")}</button></div>
+    <div className="live-histogram-head"><span>{t("desktop.live_histogram")}</span><button type="button" className="icon-btn live-histogram-toggle" title={t(available?"desktop.live_histogram_toggle":"desktop.unavailable")} aria-label={t("desktop.live_histogram_toggle")} aria-pressed={enabled} disabled={!available} onClick={()=>onToggle(!enabled)}><ChartColumn size={16} aria-hidden="true"/></button></div>
     {enabled&&data?<svg viewBox="0 0 260 65" preserveAspectRatio="none" aria-label={t("desktop.live_histogram")} role="img">
       <path d="M0 64H260M65 0V65M130 0V65M195 0V65" stroke="#edf0f2" strokeWidth="1"/>
       <path d={histogramPath(data.red)} fill="none" stroke="#c56e77" strokeWidth="1.2"/>
       <path d={histogramPath(data.green)} fill="none" stroke="#7fa06f" strokeWidth="1.2"/>
       <path d={histogramPath(data.blue)} fill="none" stroke="#7397bd" strokeWidth="1.2"/>
-    </svg>:enabled?<span className="live-histogram-empty">{t("desktop.live_histogram_waiting")}</span>:<span className="live-histogram-empty">{t("desktop.live_histogram_disabled")}</span>}
+    </svg>:<span className="live-histogram-empty">{t(!available?"desktop.unavailable":enabled?"desktop.live_histogram_waiting":"desktop.live_histogram_disabled")}</span>}
     {enabled&&data&&<span className="live-histogram-note">{t("desktop.live_histogram_software")}</span>}
   </div>;
 }
 
 export default function LivePreview({zoom=1,composition,histogramEnabled=false,onHistogramToggle=()=>{}}){
   const guides=useRef(composition),focus=useRef(null),canvas=useRef(null),fps=useRef(null),empty=useRef(null),histogramEnabledRef=useRef(false);
-  const [histogram,setHistogram]=useState(null);
+  const [histogram,setHistogram]=useState(null),[histogramAvailable,setHistogramAvailable]=useState(true);
   useEffect(()=>{histogramEnabledRef.current=histogramEnabled;if(!histogramEnabled)setHistogram(null);},[histogramEnabled]);
   useEffect(()=>{guides.current=composition;},[composition]);
   useEffect(()=>{
@@ -27,6 +28,7 @@ export default function LivePreview({zoom=1,composition,histogramEnabled=false,o
     let cancelled=false,frames=0,since=performance.now(),total=0,lastHistogramAt=0,image;
     const sampleCanvas=document.createElement('canvas');
     const sampleContext=sampleCanvas.getContext('2d',{willReadFrequently:true});
+    setHistogramAvailable(!!sampleContext);
     const processFrame=async bytes=>{
       try{
         image=await createImageBitmap(new Blob([bytes],{type:'image/jpeg'}));
@@ -62,5 +64,5 @@ export default function LivePreview({zoom=1,composition,histogramEnabled=false,o
     const unsubscribe=window.focal.onFrame(bytes=>{if(!cancelled)processor.submit(bytes);});
     return()=>{cancelled=true;processor.stop();sampleCanvas.width=0;sampleCanvas.height=0;unsubscribe();stopFocus();};
   },[]);
-  return <><canvas ref={canvas} className="preview-image live-canvas" aria-label={t("livePreview.live_view_image")} data-frames="0" style={{transform:'scale('+zoom+')'}}/><span ref={empty} className="live-loading">{t("livePreview.waiting_for_a_frame")}</span><span className="live-fps" ref={fps}>— FPS</span><LiveHistogram data={histogram} enabled={histogramEnabled} onToggle={onHistogramToggle}/></>;
+  return <><canvas ref={canvas} className="preview-image live-canvas" aria-label={t("livePreview.live_view_image")} data-frames="0" style={{transform:'scale('+zoom+')'}}/><span ref={empty} className="live-loading">{t("livePreview.waiting_for_a_frame")}</span><span className="live-fps" ref={fps}>— FPS</span><LiveHistogram data={histogram} enabled={histogramEnabled} onToggle={onHistogramToggle} available={histogramAvailable}/></>;
 }

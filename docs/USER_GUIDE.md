@@ -1,59 +1,93 @@
-# Apertrove user guide
+# Work with Apertrove
 
-You can organize existing photos and plan lighting without connecting a camera. For USB setup, see [Install Apertrove](INSTALLATION.md#check-and-connect-the-camera).
+Start with a session, then move between **Capture** for the camera and **Library** for your photographs. You can use Sessions, Library and Lighting Studio without a camera. [Installation](INSTALLATION.md) covers Canon setup.
 
-The screenshots use an isolated demonstration profile and sample images. They illustrate the interface; camera hardware observations are listed in [requirements](REQUIREMENTS.md#camera-support).
+Screenshots use a demo profile and simulated camera data.
 
-## Sessions and Library
+## Create or resume a session
 
-1. Open **Sessions** and choose **Create session**. Give the session a name and choose a writable folder. You can add a client name and notes, or ask Apertrove to create a dated subfolder.
-2. Open the session and use **Import** in the header or press **Ctrl+I**. Select existing files to copy them into the session and add them to the library.
-3. In **Library**, search by filename, change the session filter, or filter to **Top rated**. Open a photo to view its metadata and preview. Use **1–5** to rate an open photo and **0** to clear the rating.
+Open **Sessions → Create session**, enter a name and choose a writable folder. Add a client or notes if useful. Enable a dated subfolder to keep separate shoots apart.
 
-The photo viewer includes exposure, contrast, saturation, warmth, monochrome and rotation controls. **Save edits** stores those adjustments in the library. Use **Export JPEG** for a separate raster export, or **All metadata** → **JSON** for metadata. RAW viewing depends on an embedded preview; JPEG export of edited CR2/CR3 files is disabled.
+**Resume shooting** opens the session's Capture view. **Photos** opens its Library filter. Changing a session folder affects future incoming files; existing originals stay where they are.
 
-Read the confirmation before deleting a photo or session. The dialog distinguishes removing library entries from sending eligible originals to the Windows Recycle Bin. Keep a backup before removing originals or whole sessions.
+![Sessions](screenshots/sessions.png)
 
-![The Apertrove Library with sample photos](screenshots/library.png)
+## Connect and compose
 
-## Preview and Live View
+Use **Choose camera** to open a working connection. Read-only **Camera diagnostics** under Settings is a separate check. A working connection may configure the camera's save destination.
 
-Open a session, go to **Capture**, then select **Start Live View** if the camera exposes it. When you finish framing, use **Stop Live View**. To change exposure, open **Shooting settings** and choose from the values offered by the camera. The mode dial determines which settings are writable. Try **M** when you need direct control of shutter speed and aperture.
+Open **Capture → Start Live View**. The preview toolbar offers zoom, grid and **Composition guides**. Guides describe framing but do not crop your originals. **Edit panels** shows, hides and reorders workspace panels.
 
-The preview toolbar includes a grid, zoom and **Composition guides** for crop framing and safe areas. Guides are overlays and do not crop your original photos. Choose **Edit panels** in the header to show, hide or reorder the workspace panels. While Live View is active, switch **Live Histogram** on to see a software RGB sample calculated from the decoded preview. It describes the preview’s colors and brightness. When you review a saved photo, the **Histogram** panel describes that photo instead.
+The small chart icon in the Live View histogram container toggles the software RGB histogram. Its pressed state means enabled; the tooltip describes the control. The histogram needs an active, decoded preview. It describes the JPEG preview, rather than RAW sensor values.
 
-With a compatible AF lens and Live View active, **AF**, **Nearer** and **Farther** can send focus commands where supported. Check sharpness in the preview. Hardware tests on one EOS 2000D recorded command acceptance and left optical focus acquisition and physical lens movement unverified. [Camera support and limits](REQUIREMENTS.md#camera-support)
+Choose exposure values under **Shooting settings**. Writable choices come from the camera and depend on its mode dial. White balance, image quality and other controls follow the same rule.
 
-![Capture workspace showing the preview and camera controls with demonstration data](screenshots/workspace.png)
+![Capture and controls with a simulated camera](screenshots/workspace.png)
 
-## Camera features and their status
+## Focus
 
-**Camera diagnostics** is read-only. A working connection opened through **Choose camera** is intended for shooting and may configure the save destination. Separately, the controls-only route used for hardware validation supports specified exposure controls, Live View and supported focus commands with camera file operations disabled. The regular connection dialog has no controls-only selector.
+**AF** performs one bounded autofocus attempt. A command can be accepted without a confirmed focus result; check sharpness in the preview.
 
-**Capture**, **From camera card**, **Preset Series**, and interval shooting under **Tools** are implemented where the camera and connection support them. The EOS 2000D hardware checks covered exposure changes and restoration, Live View and its histogram. Shutter release, capture and camera file transfer have yet to pass hardware qualification. Keep an independent copy of your camera originals. [Camera support and limits](REQUIREMENTS.md#camera-support)
+**AI Servo** starts a sustained focus command and remains active until you turn it off. It does not wait for a one-shot focus result. The interface distinguishes an accepted command from confirmed optical focus, which the command alone cannot prove. Release it before starting an incompatible action. If release cannot be confirmed, check the camera before continuing.
 
-## Presets and tools
+**Nearer** and **Farther** send electronic lens steps where supported. Lens AF/MF state and camera mode affect availability. [Camera compatibility](COMPATIBILITY.md)
 
-Go to **Presets** to save or edit settings for a setup. Use **Export JSON** and **Import JSON** to move presets between profiles. Applying one to a connected camera depends on which values the current camera mode accepts. **Preset Series** builds an ordered capture queue with repeat counts and attempts to restore the original settings after the run.
+## Capture, flash and long exposures
 
-**Tools** also contains the activity log and **Watched folder**. To follow new files that another app saves, choose an incoming folder and select **Start auto import** while your target session is open. The incoming folder and session output must be separate and outside each other. Existing files and subfolders are not scanned. This workflow copies new supported files into the session and works independently of Canon EDSDK.
+The ordinary **Take photo** action, interval tools and preset series require a supported working connection. Keep independent originals while evaluating camera-file transfers.
+
+A flash setting, mechanical pop-up and flash firing are different operations. The interface shows mechanical pop-up as unavailable when no qualified mechanism is available. It will not claim the flash rose because a transport request succeeded.
+
+Dedicated **BULB** control is currently unavailable for the unqualified production protocol. It is not emulated by holding ordinary shutter control for a chosen duration. Where a qualified provider supplies it, the UI has explicit start/stop states and shows elapsed time only from camera events. Do not use a greyed control as a reason to force a camera command.
+
+## Know where a photo belongs
+
+Apertrove announces a received photo after the original has been written and the library entry committed. The latest received item and Library refer to that committed record.
+
+Transfers keep their delivery context across asynchronous work. If a delayed camera event could belong to more than one session, the photo is retained and marked for attention. Open the image in **Library** and use **Photo session** to assign it. If its original session was removed, the original association is retained for review. Reassigning a session changes organization; it does not move the file.
+
+A Live View frame or a focus preview is not a saved photograph.
+
+## Import, review and export
+
+Open a session, then use **Import** or **Ctrl+I** to copy existing photos into it. In Library, search filenames, filter by session or choose **Top rated**.
+
+Open a photo to inspect it. Keys **1–5** set a rating and **0** clears it. The viewer offers exposure, contrast, saturation, warmth, monochrome and rotation adjustments. **Save edits** stores those adjustments without rewriting the original. **Export JPEG** creates a separate image; **All metadata → JSON** exports metadata. Edited RAW-to-JPEG export is unavailable, and RAW viewing depends on an embedded preview.
+
+Read deletion confirmations carefully. Removing library entries and moving eligible originals to the Windows Recycle Bin are separate consequences.
+
+![Library](screenshots/library.png)
 
 ## Shot Inspector
 
-Use **Open Shot Inspector** in the **Capture** or **Library** header to open the separate review window. It follows the latest registered camera transfer. Use the pin to hold a frame in place, switch between **Fit** and **100%**, or read metadata and the displayed image’s RGB histogram. For a local file you imported into a session, open it from **Library** to inspect it. A RAW file can be saved without a readable embedded preview.
+Choose **Open Shot Inspector** in Capture or Library to open the review window on another monitor. It follows registered camera transfers. Pin a frame to pause updates; use **Fit** or **100%**, metadata and the image RGB histogram. Imported local files remain available in the Library viewer.
+
+At 100%, the displayed image maps to physical screen pixels. For RAW files with an embedded JPEG, the view and histogram refer to that preview.
+
+![Shot Inspector](screenshots/inspector.png)
+
+## Presets and tools
+
+In **Presets**, save a named set of settings, edit or duplicate it, and export/import JSON. Applying it uses the values the current camera accepts. Kelvin remains a camera descriptor control rather than an invented static preset list.
+
+**Preset series** queues settings and repeat counts and attempts to restore the original settings after a run. **Tools** includes interval controls and the activity log.
+
+**Watched folder** imports new supported files written by another application. Open a target session, choose a separate incoming folder and select **Start auto import**. The incoming and output folders must not contain one another. Existing files and subfolders are not scanned.
 
 ## Lighting Studio and Equipment
 
-Open **Lighting Studio** to choose a base color, compare harmonies, save palettes, and explore diagrams for placing lights. **Equipment** shows the camera and lens details that Apertrove can read. Manufacturer reference data and photos may come from an external source. [Privacy](PRIVACY.md)
+In **Lighting**, choose a base color, compare harmonies and save palettes. Explore lighting setups and recipes to plan a shoot. Colors are guides; the actual result depends on the light, surface and white balance.
 
-![Lighting Studio showing a color harmony and its swatches](screenshots/lighting.png)
+**Equipment** displays details available from the camera and lens. Manufacturer reference information and images may be fetched externally. [Privacy](PRIVACY.md)
 
 ## Web Remote
 
-1. In **Web Remote**, select a private network interface on your PC and select **Start Web Remote**. The camera stays connected to the PC by USB.
-2. Open the QR link from a phone on the same trusted network. Control availability follows the desktop session and camera capabilities.
-3. Select **Stop remote** when finished. The link authorizes access while the server is running. Keep it private and avoid sending it over public Wi-Fi or exposing the server to the internet. [Privacy](PRIVACY.md) · [Security](../SECURITY.md)
+In **Web Remote**, select the computer's private network interface and start the server. Scan the QR link from a phone on the same trusted LAN. The link authorizes access while the server runs; keep it private and stop the server when finished.
 
-## Settings
+The camera stays connected to the PC by USB. The remote uses a restricted set of camera commands and does not automatically expose every desktop feature.
 
-In **Settings**, change language, theme, design, accent color or Performance Mode. **File storage** contains the default capture and import path, the option to automatically select new photos, and the composition grid. Configure the Canon runtime under **Canon connection** or use **Setup and diagnostics** to reopen the setup wizard, check camera capabilities, or start the interactive tutorial.
+## Make the workspace yours
+
+**Settings** contains language, light/dark/system theme, Studio / Canon Classic / Modern appearance, accent color, Performance Mode and file storage. **Setup and diagnostics** reopens the setup wizard and interactive tutorial.
+
+[Compatibility](COMPATIBILITY.md) · [Troubleshooting](TROUBLESHOOTING.md)
