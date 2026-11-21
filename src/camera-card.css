@@ -39,6 +39,7 @@
 .camera-card-progress>div{display:flex;flex-direction:column;gap:5px;min-width:0}
 .camera-card-progress strong{font-weight:600;font-size:12px}
 .camera-card-progress span{font-size:11px;color:var(--readable-secondary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.camera-card-progress span>small{display:inline-block;margin-left:10px;font-size:10px;font-variant-numeric:tabular-nums}
 .camera-card-progress progress{height:5px;width:100%}
 .camera-card-error,.camera-card-incomplete{display:flex;align-items:center;gap:14px;padding:12px 14px;border:1px solid var(--error-border);border-radius:9px;color:var(--error-text);background:var(--error-bg);font-size:12px;line-height:1.5;margin-bottom:16px}
 .camera-card-incomplete{margin:16px 0 0;background:var(--surface-soft);border-color:var(--border);color:var(--text)}

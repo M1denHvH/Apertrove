@@ -129,6 +129,8 @@ export default function CameraCard({camera,disabled=false,onConnect,onNotice,api
   const allSelected=fileIds.length>0&&fileIds.every(id=>selectedSet.has(id));
   const isLocked=disabled||loading||exporting;
   const incomplete=receipt&&receipt.status!=='completed'&&(receipt.files?.length||receipt.failures?.length||receipt.remainingIds?.length);
+  const byteProgress=Number.isFinite(progress?.totalBytes)&&progress.totalBytes>0,progressMax=byteProgress?progress.totalBytes:progress?.total||1;
+  const progressValue=byteProgress?Math.min(progressMax,(progress.bytes||0)+(progress.currentName?progress.currentBytes||0:0)):progress?.done||0;
   const format=item=>item.kind==='volume'?t('cameraCard.volume'):item.kind==='folder'?t('cameraCard.folder'):(item.extension||t('cameraCard.unknown_format')).toUpperCase();
 
   return <section className="camera-card-browser" aria-label={t('cameraCard.source')} aria-busy={loading||exporting} onKeyDown={event=>{
@@ -145,8 +147,8 @@ export default function CameraCard({camera,disabled=false,onConnect,onNotice,api
       <>
         {error&&<div className="camera-card-error" role="alert"><span>{error}</span><button type="button" className="btn quiet" disabled={isLocked} onClick={()=>load(listing?.parentId??null)}>{t('cameraCard.retry')}</button></div>}
         {exporting&&<div className="camera-card-progress" role="status">
-          <div><strong>{t(progress?.status==='cancelling'?'cameraCard.cancelling':'cameraCard.transferring',{done:number(progress?.done||0),total:number(progress?.total||selected.length)})}</strong><span title={progress?.currentName}>{progress?.currentName}</span></div>
-          <progress aria-label={t('cameraCard.transfer_progress')} max={progress?.total||1} value={progress?.done||0}/>
+          <div><strong>{t(progress?.status==='cancelling'?'cameraCard.cancelling':'cameraCard.transferring',{done:number(progress?.done||0),total:number(progress?.total||selected.length)})}</strong><span title={progress?.currentName}>{progress?.currentName}{progress?.currentName&&Number.isFinite(progress.currentBytes)&&<small>{fileSize(progress.currentBytes)} / {fileSize(files.find(file=>file.id===progress.currentId)?.size)}</small>}</span></div>
+          <progress aria-label={t('cameraCard.transfer_progress')} max={progressMax} value={progressValue}/>
           <button type="button" className="btn quiet" disabled={progress?.status==='cancelling'} onClick={cancel}><Square size={14}/>{t('cameraCard.cancel')}</button>
         </div>}
         {!loading&&listing?.status==='unsupported'?<div className="camera-card-empty"><HardDrive size={36} strokeWidth={1.25}/><h2>{t('cameraCard.unavailable')}</h2><p>{listing.reason?legacy(listing.reason):t('cameraCard.unsupported_runtime')}</p></div>:
