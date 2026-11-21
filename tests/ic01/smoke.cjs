@@ -217,6 +217,11 @@ async function main(){
       const controlled=await call(h1Readonly,'cameraWorking',{cameraId:cameras[0].id,controlsOnly:true});
       assert.equal(controlled.connected,true);assert.equal(controlled.working,true);assert.equal(controlled.controlsOnly,true);assert.equal(controlled.eventsRegistered,false);assert.equal(controlled.saveTo,null);assert.equal(controlled.capabilities.capture,false);assert.equal(controlled.capabilities.import,false);
       assert.equal(controlled.properties.whiteBalance.writable,false);
+      const controlLabels=catalogs['en-US'];
+      await h1Readonly.page.locator('.sidebar').getByRole('button',{name:controlLabels['desktop.capture'],exact:true}).click();
+      for(const key of ['desktop.camera_controls_no_transfer','desktop.file_transfer_disabled','desktop.ready_for_camera_controls'])await h1Readonly.page.getByText(controlLabels[key],{exact:true}).waitFor();
+      assert.equal(await h1Readonly.page.getByText(controlLabels['desktop.camera_ready_to_shoot'],{exact:true}).count(),0);
+      assert.equal(await h1Readonly.page.getByText(controlLabels['desktop.ready_to_shoot'],{exact:true}).count(),0);
       const restored={},writes=[];
       for(const key of ['iso','shutter','aperture']){
         const original=controlled.properties[key].value,target=controlled.properties[key].allowed.find(value=>value!==original);assert.ok(Number.isInteger(target));
