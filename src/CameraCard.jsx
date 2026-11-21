@@ -63,7 +63,7 @@ export default function CameraCard({camera,disabled=false,onConnect,onNotice,api
   },[drainThumbnails]);
 
   const load=useCallback(async(parentId=null,{append=false,refresh=false}={})=>{
-    if(exportOwner.current||current.current.disabled||!current.current.camera.connected)return;
+    if(exportOwner.current||current.current.disabled&&!thumbnailRunning.current||!current.current.camera.connected)return;
     if(request.current){pendingNavigation.current={parentId,append,refresh};return;}
     const epoch=++generation.current;request.current=true;setLoading(true);setError('');setPreview(null);
     thumbnailQueue.current=[];thumbnailSeen.current.clear();
@@ -127,7 +127,9 @@ export default function CameraCard({camera,disabled=false,onConnect,onNotice,api
   const open=item=>item.kind==='file'?setPreview(item):void load(item.id);
   const navigate=parentId=>{if(!loading&&!exporting)void load(parentId);};
   const allSelected=fileIds.length>0&&fileIds.every(id=>selectedSet.has(id));
-  const isLocked=disabled||loading||exporting;
+  // Our background thumbnail read has its own serialized owner. It must not
+  // disable pointer-up/click between events; navigation/export await that owner.
+  const isLocked=disabled&&!thumbnailRunning.current||loading||exporting;
   const incomplete=receipt&&receipt.status!=='completed'&&(receipt.files?.length||receipt.failures?.length||receipt.remainingIds?.length);
   const byteProgress=Number.isFinite(progress?.totalBytes)&&progress.totalBytes>0,progressMax=byteProgress?progress.totalBytes:progress?.total||1;
   const progressValue=byteProgress?Math.min(progressMax,(progress.bytes||0)+(progress.currentName?progress.currentBytes||0:0)):progress?.done||0;
