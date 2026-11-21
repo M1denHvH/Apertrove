@@ -50,7 +50,7 @@ function evfRig({output=1,mode=0,restoreMismatch=false}={}){
   const context=load(section(worker,'function restoreLiveView()','\nfunction readFocus'),{
     state,evfRestore:null,live:false,captureWait:null,controls:{isBusy:()=>false},ensureWorking:()=>{},
     get:id=>restoreMismatch&&context.evfRestore&&writes.length>=2?99:values.get(id),
-    set:(id,value)=>{writes.push([id,value]);values.set(id,value);},status:()=>state,releaseEvf:()=>{},
+    set:(id,value)=>{writes.push([id,value]);values.set(id,value);},status:()=>state,refresh:()=>state,releaseEvf:()=>{},
     performance:{now:()=>0},statsAt:0,statsFrames:0,statsBytes:0,teardownUncertain:false,currentOperation:null,
     observations:{failure:value=>failures.push(value)},send:value=>events.push(value),operationError:fault
   },['restoreLiveView','liveView']);
@@ -72,6 +72,35 @@ test('failed EVF restoration preserves its original capsule and quarantines the 
   assert.throws(()=>r.context.restoreLiveView(),error=>error.code==='OPERATION_UNKNOWN_TERMINATION');
   assert.equal(r.context.evfRestore.output,1);assert.equal(r.context.evfRestore.mode,0);assert.equal(r.context.teardownUncertain,true);
   assert.equal(r.events[0].data.classification,'UNKNOWN');assert.equal(r.failures.length,1);
+});
+
+test('control-only Live View stop reads actual AF state after restore and keeps persistent changes visible',()=>{
+  const {choices,WHITE_BALANCE_COLOR_TEMPERATURE}=require('../../electron/camera-values.cjs');
+  const stageSource=fs.readFileSync(path.join(root,'tests/native-hardware/h2-stages.cjs'),'utf8');
+  const comparison=section(stageSource,'  const propertiesRestored=','\n  try{');
+  for(const finalAF of [2,0]){
+    const actions=[],values=new Map([[0x500,0],[0x501,1],[0x400,3],[PROPS.iso,88],[PROPS.shutter,123],[PROPS.aperture,80],[PROPS.whiteBalance,0],[PROPS.liveAfMode,0]]);
+    const state={working:true,controlsOnly:true,model:'synthetic',properties:{},capabilities:{liveView:true}};let context,started=false;
+    const source=section(worker,'function refresh()','\nfunction listCameras(')+section(worker,'const status =','\nconst errors=')+section(worker,'function restoreLiveView()','\nfunction readFocus')+comparison;
+    context=load(source,{
+      state,camera:{},restricted:false,PROPS,choices,WHITE_BALANCE_COLOR_TEMPERATURE,live:false,evfRestore:null,
+      get:id=>{const value=id===PROPS.afMode?(context.live?0:started?finalAF:2):(values.get(id)??0);actions.push({kind:'read',id,value});return value;},
+      set:(id,value)=>{assert.notEqual(id,PROPS.afMode);actions.push({kind:'write',id,value});values.set(id,value);if(id===0x500&&(value&2))started=true;},
+      readData:()=>null,textProperty:()=>'',sdk:{desc:(_camera,_id,out)=>{out.values=[0,1,2];out.count=3;return 0;}},
+      captureWait:null,controls:{isBusy:()=>false},ensureWorking:()=>{},releaseEvf:()=>actions.push({kind:'release'}),send:()=>{},
+      performance:{now:()=>0},statsAt:0,statsFrames:0,statsBytes:0,teardownUncertain:false,currentOperation:null,observations:{failure:()=>{}},operationError:fault
+    },['refresh','liveView','propertiesRestored']);
+    // Both models start with AI Focus=2, then report One Shot=0 while EVF is on.
+    const initial={camera:JSON.parse(JSON.stringify(context.refresh()))};assert.equal(initial.camera.properties.afMode.value,2);
+    context.liveView({enabled:true});context.refresh();assert.equal(state.properties.afMode.value,0);
+    const stopped=context.liveView({enabled:false});assert.equal(stopped.properties.afMode.value,finalAF);
+    const lastRestore=actions.findLastIndex(item=>item.kind==='write'&&item.id===0x501);
+    const release=actions.findLastIndex(item=>item.kind==='release');
+    const finalRead=actions.findLastIndex(item=>item.kind==='read'&&item.id===PROPS.afMode);
+    assert.ok(finalRead>release&&release>lastRestore,'AF must be read after EVF restoration and ref release');
+    assert.equal(context.propertiesRestored(initial,{camera:stopped}),finalAF===2,'A persistent AF difference must still fail the unchanged baseline guard');
+    assert.equal(actions.some(item=>item.kind==='write'&&item.id===PROPS.afMode),false);
+  }
 });
 
 test('control-only FocusInfo never allocates or decodes an unqualified output buffer',()=>{

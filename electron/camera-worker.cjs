@@ -411,7 +411,9 @@ function liveView({enabled}) {
     finally{live=false;releaseEvf();state.liveStats=null;status();}
   }
   statsAt=performance.now();statsFrames=0;statsBytes=0;
-  return status();
+  // Live View can change the camera's reported AF/metering state. Publish a
+  // fresh read-only snapshot after restoration instead of reusing EVF-era data.
+  return state.controlsOnly&&!enabled?refresh():status();
 }
 function readFocus(){
   // This restricted connection has no qualified FocusInfo point-layout decoder.
