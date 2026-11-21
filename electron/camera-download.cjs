@@ -22,14 +22,29 @@ function createCameraDownload(io,{filesystem=fs,chunkBytes=1024*1024}={}){
       const ext=path.extname(name),stem=path.basename(name,ext);
       for(let suffix=0;suffix<100000;suffix++){
         target=path.join(folder,stem+(suffix?'_'+suffix:'')+ext);
-        try{filesystem.linkSync(temporary,target);break;}catch(cause){if(cause.code!=='EEXIST')throw cause;target=null;}
+        try{filesystem.linkSync(temporary,target);break;}catch(cause){
+          if(['ENOTSUP','EOPNOTSUPP','EPERM','EXDEV'].includes(cause.code)){
+            // FAT/exFAT and some network destinations cannot create hardlinks.
+            // Reserve the destination exclusively and remove only our own new
+            // file if a bounded local copy fails; never replace an existing one.
+            let source=null,output=null,created=false;
+            try{
+              output=filesystem.openSync(target,'wx');created=true;source=filesystem.openSync(temporary,'r');
+              const buffer=Buffer.allocUnsafe(chunkBytes);let copied=0;
+              while(copied<size){if(cancelled())throw fail('OPERATION_CANCELLED','Camera export cancelled.');const read=filesystem.readSync(source,buffer,0,Math.min(buffer.length,size-copied),null);if(read<=0)throw fail('CARD_DOWNLOAD_SHORT','The temporary export file is incomplete.');let written=0;while(written<read){const count=filesystem.writeSync(output,buffer,written,read-written);if(count<=0)throw fail('CARD_WRITE_FAILED','The export folder could not be written.');written+=count;}copied+=read;await io.yield();}
+              filesystem.fsyncSync(output);filesystem.closeSync(output);output=null;filesystem.closeSync(source);source=null;break;
+            }catch(copyError){if(output!==null)try{filesystem.closeSync(output);}catch{}if(source!==null)try{filesystem.closeSync(source);}catch{}if(created)try{filesystem.unlinkSync(target);}catch(cleanupError){io.cleanupIssue?.(cleanupError);}if(copyError.code!=='EEXIST')throw copyError;target=null;}
+          }else{if(cause.code!=='EEXIST')throw cause;target=null;}
+        }
       }
       if(!target)throw fail('CARD_NAME_CONFLICT','No unused export filename is available.');
       try{filesystem.unlinkSync(temporary);}catch(cause){io.cleanupIssue?.(cause);}return {path:target,size};
     }finally{
-      if(!completed)try{io.cancel(ref);}catch{}
+      let cleanupFailure;
+      if(!completed)try{io.cancel(ref);}catch(cause){if(cause.code==='OPERATION_UNKNOWN_TERMINATION')cleanupFailure=cause;}
       if(descriptor!==null)try{filesystem.closeSync(descriptor);}catch{}
       try{filesystem.unlinkSync(temporary);}catch(cause){if(cause.code!=='ENOENT')io.cleanupIssue?.(cause);}
+      if(cleanupFailure)throw cleanupFailure;
     }
   }
   return {download};
