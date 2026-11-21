@@ -1794,5 +1794,7 @@
   "legacy.hold.invalid_focus": "Некорректная команда удержания фокуса.",
   "card.choose_destination": "Выберите папку экспорта",
   "card.preview_too_large": "Превью камеры слишком большое для отображения.",
-  "card.invalid_selection": "Выберите доступные файлы на карте камеры."
+  "card.invalid_selection": "Выберите доступные файлы на карте камеры.",
+  "cameraCard.item_unavailable": "Объект недоступен",
+  "cameraCard.read_error": "Не удалось прочитать объект."
 }

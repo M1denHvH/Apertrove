@@ -1770,5 +1770,7 @@
   "legacy.hold.invalid_focus": "Invalid focus hold command.",
   "card.choose_destination": "Choose an export folder",
   "card.preview_too_large": "This camera preview is too large to display.",
-  "card.invalid_selection": "Select valid files from the camera card."
+  "card.invalid_selection": "Select valid files from the camera card.",
+  "cameraCard.item_unavailable": "Unavailable item",
+  "cameraCard.read_error": "Could not read this item."
 }

@@ -58,6 +58,7 @@ export default function CameraCard({camera,disabled=false,onConnect,onNotice,api
     if(!append){setSelected([]);setImages({});setReceipt(null);}
     try{
       await thumbnailSettled.current;
+      if(!alive.current||epoch!==generation.current||!current.current.camera.connected)return;
       const response=await api.cardList({parentId,offset:append?current.current.listing?.nextOffset||0:0,limit:80,refresh});
       if(!alive.current||epoch!==generation.current)return;
       const value={...response,items:Array.isArray(response.items)?response.items:[]};
@@ -90,11 +91,12 @@ export default function CameraCard({camera,disabled=false,onConnect,onNotice,api
     const owner={operationId:null,mode};exportOwner.current=owner;thumbnailQueue.current=[];setExporting(true);setProgress({done:0,total:ids.length,status:'starting'});setReceipt(null);setError('');
     try{
       await thumbnailSettled.current;
+      if(!alive.current||!current.current.camera.connected)return;
       const result=await api.cardExport({ids,mode});
       if(!alive.current)return;
       setReceipt({...result,mode});
       if(result.status==='completed'){
-        setSelected([]);onNotice?.(t(mode==='import'?'cameraCard.imported':'cameraCard.exported',{count:number(result.files?.length||0)}));
+        setSelected([]);onNotice?.(t(mode==='import'?'cameraCard.imported':'cameraCard.exported',{count:number(mode==='import'?result.imported?.added??result.files?.length??0:result.files?.length||0)}));
       }else setSelected(result.remainingIds||[]);
     }catch(cause){if(alive.current){setError(cleanError(cause));setReceipt({status:'failed',mode,remainingIds:ids,files:[],failures:[]});}}
     finally{if(exportOwner.current===owner)exportOwner.current=null;if(alive.current){setExporting(false);setProgress(null);void drainThumbnails();}}
@@ -140,11 +142,11 @@ export default function CameraCard({camera,disabled=false,onConnect,onNotice,api
               </div>
               <div className="camera-card-table" role="table" aria-label={t('cameraCard.files')}>
                 <div className="camera-card-row camera-card-table-head" role="row"><span role="columnheader">{t('cameraCard.name')}</span><span role="columnheader">{t('cameraCard.type')}</span><span role="columnheader">{t('cameraCard.size')}</span><span role="columnheader">{t('cameraCard.date')}</span></div>
-                {listing.items.map(item=><div className={'camera-card-row'+(selectedSet.has(item.id)?' selected':'')} role="row" key={item.id}>
+                {listing.items.map((item,index)=><div className={'camera-card-row'+(selectedSet.has(item.id)?' selected':'')+(item.kind==='unavailable'?' unavailable':'')} role="row" key={item.id??'unavailable-'+index}>
                   <div role="cell" className="camera-card-file-name">
                     {item.kind==='file'?<input type="checkbox" checked={selectedSet.has(item.id)} disabled={isLocked} aria-label={t('cameraCard.select_file',{name:item.name})} onChange={()=>toggle(item.id)}/>:<span className="camera-card-checkbox-space"/>}
-                    <Thumbnail item={item} image={images[item.id]} onVisible={queueThumbnail} onOpen={()=>open(item)} disabled={isLocked} active={!loading&&!exporting} epoch={generation.current}/>
-                    <button type="button" className="camera-card-file-open" onClick={()=>open(item)} disabled={isLocked} title={item.name}>{item.name}{item.kind==='volume'&&item.volume?.capacity>0&&<small>{t('cameraCard.free_space',{free:fileSize(item.volume.free),capacity:fileSize(item.volume.capacity)})}</small>}</button>
+                    <Thumbnail item={item} image={images[item.id]} onVisible={queueThumbnail} onOpen={()=>open(item)} disabled={isLocked||item.kind==='unavailable'} active={!loading&&!exporting} epoch={generation.current}/>
+                    <button type="button" className="camera-card-file-open" onClick={()=>open(item)} disabled={isLocked||item.kind==='unavailable'} title={item.error?cleanError(item.error):item.name}>{item.kind==='unavailable'?t('cameraCard.item_unavailable'):item.name}{item.kind==='unavailable'&&<small className="camera-card-item-error">{cleanError(item.error)||t('cameraCard.read_error')}</small>}{item.kind==='volume'&&item.volume?.capacity>0&&<small>{t('cameraCard.free_space',{free:fileSize(item.volume.free),capacity:fileSize(item.volume.capacity)})}</small>}</button>
                   </div>
                   <span role="cell" className="camera-card-type">{format(item)}</span><span role="cell" className="camera-card-size">{item.kind==='file'?fileSize(item.size):'—'}</span><span role="cell" className="camera-card-date">{fileDate(item.date)}</span>
                 </div>)}
@@ -154,7 +156,7 @@ export default function CameraCard({camera,disabled=false,onConnect,onNotice,api
             {!loading&&listing?.status==='ready'&&!listing.items.length&&<div className="camera-card-empty"><FolderOpen size={36} strokeWidth={1.25}/><h2>{t('cameraCard.empty_folder')}</h2></div>}
             {listing?.nextOffset!==null&&listing?.nextOffset!==undefined&&<button type="button" className="btn camera-card-load-more" disabled={isLocked} onClick={()=>load(listing.parentId,{append:true})}>{t('cameraCard.load_more')}</button>}
           </>}
-        {incomplete&&!exporting&&<div className="camera-card-incomplete" role="status"><span>{t(receipt.status==='cancelled'?'cameraCard.cancelled_summary':'cameraCard.partial_summary',{done:number(receipt.files?.length||0),remaining:number(receipt.remainingIds?.length||0)})}</span>{receipt.remainingIds?.length>0&&<button type="button" className="btn quiet" disabled={isLocked} onClick={()=>transfer(receipt.mode,receipt.remainingIds)}>{t('cameraCard.retry_remaining')}</button>}<button type="button" className="icon-btn" aria-label={t('cameraCard.dismiss')} onClick={()=>setReceipt(null)}><X size={15}/></button></div>}
+        {incomplete&&!exporting&&<div className="camera-card-incomplete" role="status"><span>{t(receipt.status==='cancelled'?'cameraCard.cancelled_summary':'cameraCard.partial_summary',{done:number(receipt.files?.length||0),remaining:number(receipt.remainingIds?.length||0)})}{receipt.failures?.[0]?.error&&<small>{cleanError(receipt.failures[0].error)}</small>}</span>{receipt.remainingIds?.length>0&&<button type="button" className="btn quiet" disabled={isLocked} onClick={()=>transfer(receipt.mode,receipt.remainingIds)}>{t('cameraCard.retry_remaining')}</button>}<button type="button" className="icon-btn" aria-label={t('cameraCard.dismiss')} onClick={()=>setReceipt(null)}><X size={15}/></button></div>}
       </>}
     {preview&&<Modal title={preview.name} wide onClose={()=>setPreview(null)}><div className="camera-card-preview">{images[preview.id]?<img src={images[preview.id]} alt={preview.name}/>:<div><ImageOff size={38} strokeWidth={1.25}/><p>{t('cameraCard.preview_unavailable')}</p></div>}<dl><div><dt>{t('cameraCard.type')}</dt><dd>{format(preview)}</dd></div><div><dt>{t('cameraCard.size')}</dt><dd>{fileSize(preview.size)}</dd></div><div><dt>{t('cameraCard.date')}</dt><dd>{fileDate(preview.date)}</dd></div></dl><div className="camera-card-preview-actions"><button type="button" className="btn" disabled={isLocked} onClick={()=>{setPreview(null);void transfer('import',[preview.id]);}}><Upload size={15}/>{t('cameraCard.import_library')}</button><button type="button" className="btn dark" disabled={isLocked} onClick={()=>{setPreview(null);void transfer('export',[preview.id]);}}><Download size={15}/>{t('cameraCard.export_folder')}</button></div></div></Modal>}
   </section>;
