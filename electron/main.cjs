@@ -236,17 +236,17 @@ function installHandlers(){
       return dir;
     }finally{controlBusy=false;remote?.publishState();}
   };
-  const connectCamera=({cameraId,readOnly=false,savePreference,reconfigure=false}={})=>withRuntime(async sdkDir=>{
+  const connectCamera=({cameraId,readOnly=false,controlsOnly=false,savePreference,reconfigure=false}={})=>withRuntime(async sdkDir=>{
       knownCameras=await call('listCameras',{sdkDir});emit('cameras',knownCameras);
       const selected=cameraId||knownCameras.find(c=>c.id===store.settings.preferredCameraId)?.id;
       const entry=knownCameras.find(c=>c.id===selected)||(knownCameras.length===1?knownCameras[0]:null);
       if(entry&&camera.connected&&camera.cameraId!==entry.id)await call('disconnect');
       if(quitting)throw Error(t('operation.closed'));
-      if(entry&&!camera.connected&&!readOnly)await flashBridge.probe(entry.model,{force:true});
+      if(entry&&!camera.connected&&!readOnly&&!controlsOnly)await flashBridge.probe(entry.model,{force:true});
       if(quitting)throw Error('Приложение закрывается.');
       const result=await call('connect',{sdkDir,folder:store.settings.captureFolder,cameraId:selected,
-        readOnly,reconfigure,savePreference:savePreference??store.settings.savePreference});
-      if(result.connected&&!readOnly){store.settings.preferredCameraId=result.cameraId;await persist();}
+        readOnly,controlsOnly,reconfigure,savePreference:savePreference??store.settings.savePreference});
+      if(result.connected&&!readOnly&&!controlsOnly){store.settings.preferredCameraId=result.cameraId;await persist();}
       return result;
   });
   const handlers={
@@ -346,7 +346,12 @@ function installHandlers(){
       if(workerState?.issue)throw Object.assign(Error(t('operation.unknown')),{code:'OPERATION_UNKNOWN_TERMINATION'});
       await saveOnboarding({report});return report;
     },
-    cameraWorking:async({cameraId,savePreference}={})=>{
+    cameraWorking:async({cameraId,savePreference,controlsOnly=false}={})=>{
+      if(typeof controlsOnly!=='boolean')throw Error('Некорректный режим подключения.');
+      if(controlsOnly){
+        if(camera.connected&&camera.working&&camera.controlsOnly!==true)throw Error('Отключите рабочую камеру перед подключением без передачи файлов.');
+        return connectCamera({cameraId,controlsOnly:true});
+      }
       if(![2,3].includes(savePreference))throw Error('Выберите режим сохранения.');
       if(camera.live)throw Error('Остановите Live View перед сменой места сохранения.');
       const result=await connectCamera({cameraId,savePreference,reconfigure:true});
