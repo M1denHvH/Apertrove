@@ -17,6 +17,8 @@ Screenshots are from the packaged app with an isolated demo profile, sample artw
 
 ## What you can do
 
+The camera features below are implemented, but this candidate has only passed native runtime lifecycle and camera-count checks. Diagnostics, Live View, focus and capture still need hardware qualification. [Current compatibility evidence](docs/HARDWARE_COMPATIBILITY.md)
+
 - **Frame and shoot from the computer.** Use Live View, composition guides, remote shutter release, and the exposure and focus controls available on your camera.
 - **Repeat a setup.** Save camera presets or queue them in an ordered series to shoot variants of the same setup.
 - **Keep each shoot together.** Give every session its own output folder. Import photos, browse the library, rate and filter frames, and inspect metadata.
@@ -32,7 +34,7 @@ Screenshots are from the packaged app with an isolated demo profile, sample artw
 3. You can create sessions, import photos, and use Lighting Studio straight away. Camera control requires compatible x64 Canon EDSDK components installed separately from official Canon software or obtained through [Canon’s developer program](https://www.usa.canon.com/support/sdk). [EOS Utility](https://www.usa.canon.com/support/eos-utilities) and Picture Style Editor are potential sources; the included runtime and its architecture depend on the release. The first-run guide checks installed components and lets you choose their folder.
 4. Close EOS Utility, Picture Style Editor and other software using the camera, connect the powered camera with a USB data cable, and use Apertrove’s **Find cameras** action. Create a session and choose where incoming photos should go.
 
-Earlier builds recorded hands-on tests with the **Canon EOS 2000D over USB**. On 21 November 2026, one separately installed Picture Style Editor x64 runtime, file version **3.18.40.0**, passed a controlled initialize/terminate cycle with no camera connected. That result covers the runtime lifecycle; camera diagnostics, capture, focus and Live View on this revision require separate checks. Other Canon models and PSE releases are not qualified by that result. The package was verified on Windows 10 x64. Windows 11 x64 is a target, pending a separate clean-machine check. See [requirements](docs/REQUIREMENTS.md) and [troubleshooting](docs/TROUBLESHOOTING.md).
+On 21 November 2026, one separately installed Picture Style Editor x64 runtime, file version **3.18.40.0**, passed N2 initialize/terminate with both raw codes `0`. With a **Canon EOS 2000D connected over USB**, H1A then counted **one camera**; all five SDK returns were `0`, and the worker exited naturally with an empty supervised process tree. H1 diagnostics stopped in the Electron launcher before SDK execution, so firmware, lens and camera properties were not read. H2/H3 remain untested, and the DATA-005 camera-transfer durability issue remains open; full capture integration is held. These results do not qualify other Canon models or PSE releases. The package was verified on Windows 10 x64; Windows 11 x64 awaits a clean-machine check. See [compatibility evidence](docs/HARDWARE_COMPATIBILITY.md), [requirements](docs/REQUIREMENTS.md) and [troubleshooting](docs/TROUBLESHOOTING.md).
 
 ## Develop
 

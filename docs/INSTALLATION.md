@@ -22,16 +22,16 @@ For camera control, install official Canon software for your exact model and reg
 
 Apertrove checks standard Canon installation directories, including EOS Utility and Picture Style Editor under Program Files. You can also select the folder containing a compatible `EDSDK.dll`. Keep that official installation and its dependencies intact; do not copy a DLL from another installation or an unofficial download site. A 32-bit DLL cannot load in the x64 app.
 
-The controlled N2 test on 21 November 2026 verified one PSE x64 runtime, file version 3.18.40.0, through a single initialize/terminate cycle with no camera connected. This is not a claim that all PSE versions or camera operations work. The exact tested identity and remaining camera checks are listed in [requirements](REQUIREMENTS.md).
+On 21 November 2026, one PSE x64 runtime, file version 3.18.40.0, passed N2 initialize/terminate with raw codes `0`/`0`. H1A then counted one camera with an EOS 2000D connected over USB; all five SDK returns were `0`, and the worker exited naturally with an empty supervised process tree. H1 diagnostics stopped in the Electron launcher before SDK execution; camera firmware, lens and properties were not read. H2/H3 remain untested. The exact runtime/addon identities and test commits are in [compatibility evidence](HARDWARE_COMPATIBILITY.md). These results do not establish compatibility for all PSE versions or camera operations.
 
 Use the diagnostic screen to confirm that the library loads. If the SDK is missing or incompatible, you can skip camera setup and use sessions, local import, and Lighting Studio.
 
-## 4. Connect and take a test frame
+## 4. Connect and check qualification
 
 1. Exit EOS Utility, Picture Style Editor and any other camera host, including tray launchers that open a connection. A Canon Webcam Utility background service can also hold the camera; see [troubleshooting](TROUBLESHOOTING.md).
 2. Turn on the camera and connect it directly with a USB data cable.
 3. Choose **Find cameras** in Apertrove and select the detected camera.
 4. Create a session, pick a writable output folder, and select a destination that includes the computer if you want incoming files in Apertrove.
-5. Try a single test shot and check the session folder and library.
+5. Check the [current qualification status](HARDWARE_COMPATIBILITY.md) before using camera controls. Capture and durable camera handoff remain unqualified while DATA-005 is open; full capture integration is held. Use local import for existing photos, and reserve new isolated test frames for an explicitly scoped capture test.
 
 Keep the application and your photo folders separate. Before replacing a portable build, back up the original photos and local Apertrove/Focal Studio application data. [Troubleshooting](TROUBLESHOOTING.md)

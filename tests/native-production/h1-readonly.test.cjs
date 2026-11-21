@@ -175,18 +175,6 @@ test('H1 diagnostics retain the existing end-diagnostics ownership guard',()=>{
   assert.match(source,/disconnect/);
 });
 
-test('H1 ABI decision keeps device and property output structs blocked',()=>{
-  const matrix=fs.readFileSync(path.join(root,'docs/NATIVE_ABI_MATRIX.md'),'utf8');
-  const decision=fs.readFileSync(path.join(root,'docs/H1_ABI_DECISION.md'),'utf8');
-  const checklist=fs.readFileSync(path.join(root,'docs/H1_READ_ONLY_CHECKLIST.md'),'utf8');
-  assert.match(matrix,/\| `EdsDeviceInfo` \|[\s\S]*?\*\*UNKNOWN\*\*/);
-  assert.match(matrix,/\| `EdsPropertyDesc` \|[\s\S]*?\*\*UNKNOWN\*\*/);
-  assert.match(matrix,/\| Calling convention functions \/ callbacks \|[\s\S]*?\*\*UNKNOWN\*\*/);
-  assert.match(decision,/Решение: BLOCKED/);
-  assert.match(decision,/H1A не имеет безопасного допуска сейчас/);
-  assert.match(checklist,/Volume access is \*\*NOT QUERIED\*\*/);
-});
-
 test('IC01 smoke provenance distinguishes tested HEAD from baseline',()=>{
   const smoke=fs.readFileSync(path.join(root,'tests/ic01/smoke.cjs'),'utf8');
   assert.match(smoke,/testedHead=cp\.execFileSync\('git',\['rev-parse','HEAD'\]/);

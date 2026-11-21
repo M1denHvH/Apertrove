@@ -1,34 +1,30 @@
 # H1 ABI decision — Canon read-only diagnostics
 
-**Решение: BLOCKED. H1 остаётся NOT RUN и не готов к отдельному разрешению на работу с камерой.** Это решение о доказанности native ABI, не о правах использования SDK.
+**21 November 2026: the targeted Windows x64 ABI boundary is technically justified. H1 camera diagnostics remain NOT RUN because the attempted Electron launcher stopped before SDK admission.** The current blocker is the launcher, not the earlier blanket requirement for matching proprietary headers.
 
-Обновление 21 ноября 2026: отдельный N2 lifecycle experiment завершён с SOURCE_ZERO_CYCLE; [результат и его границы](N2_EXECUTION_PLAN.md). Он не квалифицирует перечисленные ниже H1 output layouts. Таблица сохраняет состояние целевого H1 review до аппаратной квалификации.
+[Hardware evidence](HARDWARE_COMPATIBILITY.md) distinguishes completed N2, successful H1A count-only enumeration and blocked H1. H1A returned one camera; all five native returns were zero and the worker exited naturally with an empty Job tree. It did not request device info, open a camera session or read properties.
 
-## Статус ABI
+## Current qualification
 
-| Тип / группа | Статус | Основание |
+| Boundary | Technical evidence | Remaining limit |
 |---|---|---|
-| `EdsDeviceInfo`, `EdsPropertyDesc`, `EdsAccess`, `EdsDataType`, `EdsChar`, layout/padding | **UNKNOWN** | Нет полного текущего Canon declaration и размера/packing, связанных с установленным PSE runtime. `EdsDeviceInfo` и `EdsPropertyDesc` записываются нативной DLL в Koffi-буферы. |
-| `EdsUInt32`, `EdsInt32` | **PARTIAL** | Справочник описывает типы и 4-байтовый `EdsRetain` return, но нет SDK typedef header, подтверждённого для указанной DLL. |
-| Opaque refs, указатели и H1 callbacks | **PARTIAL** | Формы `Ref*`/out pointers и прототипы событий описаны; exact calling macros, current binary mapping и callback lifetime/quiescence не подтверждены. |
-| `EdsGetPropertySize`, `EdsGetPropertyData`, discovery/session/refcount functions | **PARTIAL** | Формы аргументов, результат и ownership частично документированы. Это не proof совместимости функций с конкретной DLL. |
-| `EdsGetDeviceInfo`, `EdsGetPropertyDesc` | **UNKNOWN** | Вызовы используют layouts из предыдущей строки `UNKNOWN`; эти функции действительно входят в discovery/diagnostic path. |
-| **QUALIFIED** | **Нет** | Нет matching official headers или иного подтверждения точного ABI для текущего runtime. |
+| `EdsChar`, `EdsInt32`, `EdsUInt32`, `EdsBool` | Canon Reference §2.14 and Windows x64 LLP64: char 1 byte; long/unsigned long/int 4 bytes | Encoding and property-specific interpretation are separate. |
+| Opaque refs and ref outputs | 8-byte pointers and pointer-to-pointer outputs, documented ownership, real H1A list/count/release | H1A did not exercise child selection or sessions. |
+| `EdsDeviceInfo` | Size 520, alignment 4, offsets 0/256/512/516; three labeled archived declarations corroborate the binding | Technically justified layout, not an actual H1 device-info result. |
+| `EdsPropertyDesc` | Size 524, alignment 4, offsets 0/4/8/12; current Reference and archived declarations agree on field order and extent | No real descriptor results yet. |
+| `EdsAccess`, `EdsDataType` | 4-byte Windows enum representation; bindings preserve the physical bits | Do not infer write permission from the reserved access field. |
+| Function/callback convention | Windows x64 ABI and reviewed callback parameter shapes | Callback lifetime/quiescence remain unverified; H1 registers no Canon callbacks. |
 
-Подробные формы, арифметические оценки source-layout, страницы справочника и остаточная неопределённость приведены в [NATIVE_ABI_MATRIX.md](NATIVE_ABI_MATRIX.md). `sizeof` / `alignof` / `offsetof` probe не собирался: matching headers локально не найдены. Публичный Reference 13.20.11 указывает, что типы API определены в `EDSDKTypes.h` и за последними definitions надо обращаться к header (§1.4.1, §6.2); исторический header не был бы достаточным основанием для PSE DLL.
+[HARDWARE_ABI_QUALIFICATION.md](HARDWARE_ABI_QUALIFICATION.md) records exact provenance and the independent compile-only MSVC probe. Its size/alignment/offset assertions passed with exit 0. No proprietary header was committed or DLL loaded by the probe. The earlier claim that a useful probe was impossible without an exact matching SDK package is superseded. An unavailable public DLL-SHA-to-package mapping is not a universal prerequisite.
 
-Кандидат, который проверен только как файл: Windows x64 `C:\Program Files\Canon\Picture Style Editor\EDSDK.dll`, file version `3.18.40.0`, `1,522,576` bytes, SHA-256 `35c5fd7564cf8eee3bc41004a0ab21d96caccb36ea1a1ddb512caf7b1c046627`, Authenticode `Valid`, signer `Canon Inc.`. Версия и подпись не устанавливают соответствие заголовков этому binary.
+## Execution boundary and result
 
-## H1 и H1A
+H1 permits discovery/device info, one session, bounded property size/type/data/descriptor reads and cleanup. It does not register Canon handlers, write properties or SaveTo/Capacity, download/cancel, start EVF, focus or release the shutter. `EdsGetVolumeInfo` remains excluded because its layout is not qualified.
 
-H1 **BLOCKED** до надёжного технического обоснования output layouts и используемых scalar/enum/ref/callback declarations. Допустимо сопоставление Canon Reference, маркированных исторических headers, известных type declarations, Windows x64 ABI и Koffi bindings с явным уровнем уверенности; официальное отображение DLL SHA → SDK package не является универсальным обязательным доказательством. Вызов H1 сейчас может передать недостаточно обоснованный output layout в `EdsGetDeviceInfo` или `EdsGetPropertyDesc`.
+The H1 launcher exited `2147483651` (`0x80000003`) before Job assignment and the production-main grant. No native worker, API trace or camera report was produced. This is **BLOCKED before SDK execution**, not a native compatibility failure or a successful H1. A cause-specific correction, safe verification and renewed user approval are required before another real attempt. No automatic retry is authorized.
 
-H1A не имеет безопасного допуска сейчас. Отказ от DeviceInfo/PropDesc оставляет только список/счётчик камер, но `EdsGetCameraList`, `EdsGetChildCount`, `EdsGetChildAtIndex`, owned refs, output pointers и release всё равно требуют совместимого pointer/calling/ownership ABI. Одного количества недостаточно, чтобы выбрать EOS 2000D при нескольких устройствах. Поэтому это только возможный будущий, отдельно проверяемый эксперимент после qualification этих базовых функций; запуск не разрешён.
+## Attribution and limits
 
-Код диагностики уже намеренно **не вызывает `EdsGetVolumeInfo`**; `EdsVolumeInfo` остаётся U, а отчёт явно указывает, что сведения о томе не запрашивались. Источник H1 остаётся read-only: не меняет SaveTo/Capacity и не запускает shutter, EVF, AF, импорт или удаление. Эти ограничения не компенсируют неизвестные DeviceInfo/PropertyDesc layouts.
+IC01 now checks its launcher SHA against actual Git HEAD and records/rechecks source hashes. Earlier H1/histogram reports with a mismatched launcher sourceCommit remain historical evidence, not final-HEAD certification. Synthetic tests do not qualify the physical camera or native callback lifetime.
 
-## Smoke attribution и ограничения
-
-Ранее сохранённые IC01 H1/histogram отчёты содержали `sourceCommit: 0284c546…`, а runner лишь переписывал launcher environment и не сверял его с Git HEAD. Проверка 73 tracked entries из старых `sourceHashes` совпала с содержимым `81beeddb…`; три файла отличаются только CRLF/LF нормализацией. Остальные 60 хэшей относятся к тогдашнему generated `dist`. Это подтверждает содержимое источников лучше, чем старое поле, но не устанавливает, почему launcher передал родительский commit `0284c54…`; старое поле само по себе не является доказательством tested HEAD или baseline. Новый узкий IC01 runner пишет `testedHead`, требует равенство launcher SHA с `git rev-parse HEAD`, отдельно хранит optional `baselineCommit`, а `sourceHashes` перечисляет фактически прочитанные файлы и проверяет их неизменность до конца прогона.
-
-N2 уже завершён; повторять его для ещё одного PASS не требуется. Следующий H1 шаг — адресное сопоставление declarations и compile-time type/layout probe без DLL load при наличии headers. Применимые условия локального использования учитываются отдельно от технической квалификации; подтверждение пользователя не является доказательством Canon grant. Юридический статус здесь повторно не исследуется. Во время исходного ABI review DLL и камера не запускались; последующий N2 result описан отдельно.
+N2 is complete and should not be repeated merely for another PASS. H2/H3 remain NOT RUN and require separate operation-specific approvals. DATA-005 remains OPEN. Technical compatibility and applicable local-use conditions are separate questions; user confirmation is not evidence of a Canon license grant.

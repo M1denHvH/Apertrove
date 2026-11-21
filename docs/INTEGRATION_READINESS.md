@@ -1,5 +1,7 @@
 # Integration Candidate readiness — S1 → S2C
 
+Current update (21 November 2026): see [hardware compatibility evidence](HARDWARE_COMPATIBILITY.md) for completed N2/H1A and the H1 launcher blocker. This document retains the historical integration plan. DATA-005 remains OPEN; full capture merge readiness is not established, and final merge requires the user's confirmation.
+
 **Обновление IC01, 2026-11-19:** исходный план ниже сохранён как история S2C. Задание IC01 отдельно разрешило и обеспечило official Electron45.3.2 с fail-closed unpackaged fake provider. Actual main/preload/renderer/utilityProcess smoke и текущая классификация gates описаны в `docs/INTEGRATION_CANDIDATE_01.md`; exact final HEAD/commands/exits определяют ignored `qa/integration-candidate/execution-ledger.json`, `smoke-results.json` и `final-verification.json`. Историческое «real Electron не выполнен» ниже относится к S2C, а не к этому новому контуру. Combined lifecycle merge gate закрывается только согласованным final PASS этих receipts и независимым review на том же source; package/vendor/hardware release gates и SEC-004 main CSP остаются открытыми.
 
 Дата: 2026-11-19. Ветка: `feat/s2c-operation-lifecycle`; worktree: `%USERPROFILE%\Desktop\Apertrove-s2c`. Это краткий integration plan, а не новый общий аудит. Точный candidate HEAD, исполненные commands/exits, source hashes и ограничения определяются `docs/SPRINT_S2C.md` и ignored `qa/s2c/` execution/final-verification evidence. Исторические PASS не сертифицируют новый HEAD; наличие test file не считается его выполнением.

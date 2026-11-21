@@ -1,5 +1,7 @@
 # Предлагаемый первый review PR
 
+Current update (21 November 2026): see [hardware compatibility evidence](HARDWARE_COMPATIBILITY.md) for completed N2/H1A and the H1 launcher blocker. This document retains the historical integration plan. DATA-005 remains OPEN; full capture merge readiness is not established, and final merge requires the user's confirmation.
+
 **Title:** Protect library integrity and verify isolated Electron integration
 
 **Conditional final qualification:** candidate SHA, локальные commits и фактические результаты берутся из ignored `qa/integration-candidate/final-verification.json`, `execution-ledger.json` и `independent-review.json`. Этот PR scope квалифицируется как **MERGE-READY** только при PASS final manifest/ledger, всех17 named commands с exit0 и independent clearance без unresolved blocking findings для одного и того же SHA/source bytes. Иначе он **REVIEW-READY BUT MERGE-BLOCKED**. Исторический precommit PASS ниже сам по себе не закрывает это условие. Push/open PR, human merge approval и release не выполняются этим draft и требуют своих отдельных решений.
