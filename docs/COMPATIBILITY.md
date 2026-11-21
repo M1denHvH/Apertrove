@@ -25,11 +25,13 @@ A greyed control can mean the feature is unsupported, unavailable in the current
 | Shutter and camera-file transfer | Implemented, with broader real-camera testing still needed. A simulated capture cannot certify physical behavior. |
 | Local Library, sessions and Lighting Studio | No camera or Canon runtime required. |
 
-Mechanical **flash pop-up** and dedicated **BULB start/end** remain unavailable in the production application. Flash mode and firing settings are not mechanical pop-up. Selecting BULB on a camera does not establish remote control support.
+Development builds include **built-in flash pop-up** and **BULB start/end** controls for verified runtime and camera-capability combinations. Initial native support is limited to the verified x64 Canon runtime with Windows file version **3.18.40.0** and recognized camera capabilities. A matching version number alone is not a support guarantee; other or unrecognized combinations retain unavailable controls.
+
+Physical compatibility of these new routes still needs hardware testing. Flash mode and firing settings do not establish mechanical pop-up; an accepted raise command does not prove the position of the flash. BULB requires an offered compatible route and the camera to be in BULB mode. Exposure time is shown only from camera messages, and an unknown stop is not treated as a completed exposure.
 
 ## Testing status
 
-Earlier hardware observations cover a limited set of camera state reads, exposure changes with restoration, Live View and its software histogram. Those observations do not certify the full EOS range. Newer Servo, orientation and shutter workflows also have automated fake-provider tests; physical results still require testing on each relevant setup.
+Earlier hardware observations cover a limited set of camera state reads, exposure changes with restoration, Live View and its software histogram. Those observations do not certify the full EOS range. Newer Servo, orientation, shutter, flash and BULB workflows also have automated fake-provider tests; those results do not establish physical behavior on a particular setup.
 
 You can help by reporting your camera model, firmware, lens, Apertrove version, runtime version and the exact workflow. A connection report is useful even if you do not know the runtime version. [Share a result or problem](https://github.com/M1denHvH/Apertrove/issues/new?template=bug_report.yml). Do not include serial numbers or Canon binaries.
 

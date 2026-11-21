@@ -8,9 +8,10 @@ The source still identifies itself as **0.10.3**. These changes follow the publi
 - One AF control combines One Shot and AI Servo. Shutter requests can proceed with active Servo and wait for a short mode transition when needed.
 - Preview orientation follows current EVF camera data on supported combinations, with manual 90° rotation and a return to automatic orientation.
 - Camera arrivals keep their session context. Ambiguous delayed transfers can be assigned in Library without moving originals.
+- Development flash pop-up and BULB controls are available only for verified runtime/camera combinations, with unavailable fallback elsewhere. Their physical compatibility still needs hardware testing.
 - The public guides and demo screenshot gallery describe the current workspace.
 
-Camera behavior also has automated fake-provider coverage. This proves application paths and error handling, not physical behavior on every camera. See [Camera support](COMPATIBILITY.md). Mechanical flash pop-up and dedicated BULB remain unavailable.
+Camera behavior also has automated fake-provider coverage. This proves application paths and error handling, not physical behavior on every camera. See [Camera support](COMPATIBILITY.md) for the initial native runtime scope and the limits of the new flash/BULB controls.
 
 ## Published 0.10.3
 

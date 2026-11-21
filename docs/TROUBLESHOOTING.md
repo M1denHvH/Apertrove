@@ -25,7 +25,10 @@ For a camera problem, begin with **Settings → Setup and diagnostics → Camera
 | Looking for the Servo switch | Open the arrow inside the AF control. When Servo is active, the main AI Servo button stops it. |
 | A short click behaves like a long series | Release the input or leave the app window, then inspect the camera. The maximum hold limit is a fallback. Report the drive mode, Servo state, input method and exact sequence. Do not treat this as normal behavior. |
 | Servo/shutter release is unknown | The app could not confirm the outcome. Check the camera before repeating a physical operation; follow the displayed recovery instruction. |
-| Flash pop-up or BULB disabled | These controls are currently unavailable. Flash settings do not prove mechanical pop-up, and a long ordinary shutter press is not presented as dedicated BULB support. |
+| Flash pop-up or BULB disabled | Development support is limited to verified runtime/camera combinations. Other connections retain unavailable controls. For BULB, also set the camera to BULB mode or choose an offered Bulb shutter setting. See [Camera support](COMPATIBILITY.md). |
+| Raise-flash request accepted but position unclear | Check the physical flash. Command acceptance alone does not prove that the mechanism rose. |
+| BULB time says it is waiting | The camera has not supplied an exposure-time message. The app does not replace this with a local estimate. |
+| BULB stop failed or connection was lost | The exposure may still be active. Check the camera and follow recovery instructions; do not start another operation on the assumption that it ended. |
 
 ## Files and review
 

@@ -66,7 +66,15 @@ In a supported continuous drive mode, hold the shutter button to shoot a series 
 
 Wait for the save operation and inspect the received file. Live View and an AF preview are not saved photographs. A message that capture completion is unverified means the app could not prove the complete result; check the camera, card and output folder before repeating it.
 
-Mechanical flash pop-up and dedicated BULB control are currently unavailable. Flash mode, flash firing and the physical pop-up are separate actions. Apertrove does not treat a successful setting change as proof that the mechanism rose.
+### Flash and BULB in development builds
+
+These controls become available only for verified camera/runtime combinations. Their physical behavior still needs hardware testing; an unavailable control is the fallback for an unrecognized combination.
+
+Use **Raise flash** when offered for a camera with a built-in flash. Check the camera after the request: an accepted command alone does not confirm the mechanism's position. Flash mode, firing and physical pop-up remain separate operations.
+
+For a long exposure, set **BULB** on the camera, or choose Bulb in the shutter-speed control when offered. Press **Start BULB**, then **End BULB** to end the exposure. Other incompatible shooting actions stay unavailable while it is active. Elapsed time appears only when the camera reports it; a waiting message is not a local estimate.
+
+If a stop fails or the connection is lost, the exposure may still be active. Check the camera and follow the displayed recovery instruction before starting another operation. Do not assume the shutter closed because the preview or app window changed.
 
 ## 5. Review what arrived
 
