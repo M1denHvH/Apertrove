@@ -8,6 +8,18 @@ const cleanError=error=>legacy(String(error?.message||error||'').replace(/^Error
 const fileSize=size=>Number.isFinite(size)?size>=1048576?`${number(size/1048576,{maximumFractionDigits:1})} MB`:`${number(size/1024,{maximumFractionDigits:0})} KB`:'—';
 const fileDate=value=>value&&Number.isFinite(new Date(value).getTime())?date(value,{year:'numeric',month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}):'—';
 const imageSource=result=>typeof result?.image==='string'&&/^data:image\/(?:jpeg|png|webp);base64,/.test(result.image)?result.image:null;
+function thumbnailCache(previous,id,image){
+  const next={...previous,[id]:image};
+  // Browsing many pages must not keep every image in renderer memory. Evicted
+  // thumbnails fall back to metadata until the next folder read or refresh.
+  let characters=Object.values(next).reduce((sum,value)=>sum+(value?.length||0),0);
+  for(const key of Object.keys(next)){
+    if(Object.keys(next).length<=128&&characters<=24*1024*1024)break;
+    if(key===id)continue;
+    characters-=next[key]?.length||0;delete next[key];
+  }
+  return next;
+}
 const FileIcon=({item,...props})=>item.kind==='volume'?<HardDrive {...props}/>:item.kind==='folder'?<Folder {...props}/>:/^(mov|mp4|avi)$/i.test(item.extension||'')?<Film {...props}/>:item.extension?<FileImage {...props}/>:<File {...props}/>;
 
 function Thumbnail({item,image,onVisible,onOpen,disabled,active,epoch}){
@@ -40,7 +52,7 @@ export default function CameraCard({camera,disabled=false,onConnect,onNotice,api
         if(epoch!==generation.current)continue;
         try{
           const operation=api.cardThumbnail({id});thumbnailSettled.current=operation.catch(()=>{});const result=await operation;
-          if(alive.current&&epoch===generation.current)setImages(old=>({...old,[id]:imageSource(result)}));
+          if(alive.current&&epoch===generation.current)setImages(old=>thumbnailCache(old,id,imageSource(result)));
         }catch{/* A missing thumbnail leaves a file icon; listing and export stay usable. */}
       }
     }finally{thumbnailRunning.current=false;}

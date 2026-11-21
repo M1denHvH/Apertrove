@@ -158,7 +158,7 @@ function App(){
       if(!modal&&page==='library'&&librarySource==='local'&&(e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='a'){e.preventDefault();setPhotoSelectionMode(true);setMarkedPhotos(viewerPhotos.map(photo=>photo.id));return;}
       if(e.code==='Space'&&!e.target.closest?.('button')&&page==='capture'&&!modal&&cam.connected&&!bulbMode&&cam.capabilities?.capture!==false&&!captureBlocked){e.preventDefault();if(!e.repeat){if(nativeContinuous)startBurst();else takePicture({source:'keyboard-body'});}}
       if((e.key==='ArrowRight'||e.key==='ArrowLeft')&&viewerPhotos.length&&!(page==='library'&&librarySource==='camera'&&!modal)){e.preventDefault();movePhoto(e.key==='ArrowRight'?1:-1);}
-      if(/^[0-5]$/.test(e.key)&&photo)updateRating(photo.id,Number(e.key));
+      if(/^[0-5]$/.test(e.key)&&photo&&!(page==='library'&&librarySource==='camera'&&!modal))updateRating(photo.id,Number(e.key));
       if(e.ctrlKey&&e.key.toLowerCase()==='i'){e.preventDefault();run('import',()=>api.importFiles());}
     };const up=e=>{if(e.code==='Space')stopBurst();};const blur=()=>stopBurst();window.addEventListener('keydown',fn);window.addEventListener('keyup',up);window.addEventListener('blur',blur);return()=>{window.removeEventListener('keydown',fn);window.removeEventListener('keyup',up);window.removeEventListener('blur',blur);};
   },[page,modal,cam.connected,cam.capabilities?.capture,busy,selected,data?.interval,photos,metadataOpen,nativeContinuous,bulbMode,sequenceBusy,captureBlocked,librarySource,libraryScope,librarySeries,search,filter,markedPhotos,photoSelectionMode,photoDeletionBlocked,setupView,setupDismissed,data?.showOnboarding,tutorial]);
