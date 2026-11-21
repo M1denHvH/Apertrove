@@ -190,7 +190,7 @@ async function main(){
       for(const photo of completed.photos)physical.set(photo.path,hash(photo.path));
     });
     await check('D4 partial pair and late RAW-like file cannot become guaranteed capture B identity',async()=>{
-      const before=(await driver(lifecycle,'snapshot')).photos.length;await driver(lifecycle,'workerControl','configure',{nextCapture:{mode:'pair',secondDelayMs:300}});assert.equal((await call(lifecycle,'capture')).confirmation,'UNVERIFIED');assert.equal((await call(lifecycle,'capture')).confirmation,'UNVERIFIED');
+      const before=(await driver(lifecycle,'snapshot')).photos.length;await driver(lifecycle,'workerControl','configure',{nextCapture:{mode:'pair',secondDelayMs:300}});assert.equal((await call(lifecycle,'capture')).confirmation,'CONFIRMED');assert.equal((await call(lifecycle,'capture')).confirmation,'CONFIRMED');
       const state=await eventually(()=>driver(lifecycle,'snapshot'),state=>state.photos.length===before+3,'deferred RAW-like original registered');const arrived=state.photos.slice(before);assert.ok(arrived.some(photo=>/\.cr3$/i.test(photo.path)));for(const photo of arrived){assert.equal(photo.transfer.captureId,null);assert.equal(photo.transfer.operationId,null);assert.notEqual(photo.transfer.correlation,'CONFIRMED');physical.set(photo.path,hash(photo.path));}
     });
     await check('D4 session boundary quarantines delayed uncorrelated original and malformed messages cannot poison epoch',async()=>{

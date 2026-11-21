@@ -118,7 +118,7 @@ function properties(){
 function capabilities(working,controlsOnly=false){return {capture:!!working&&!controlsOnly,import:!controlsOnly,liveView:!!working&&syntheticLiveView,liveOrientation:!!working&&state.live&&state.liveOrientation.available,focus:!!working&&productControls,manualFocus:!!working&&productControls,servo:!!working&&productControls,bulb:!!working&&productControls&&bulbQualified,flashPopup:!!working&&productControls&&flashQualified,reason:working?null:'Explicit synthetic diagnostic connection.'};}
 function stopSyntheticFrames(){if(frameTimer){clearInterval(frameTimer);frameTimer=null;}}
 function sendSyntheticFrame(){if(state.connected&&state.working&&state.live)send({event:'frame',data:seed,sequence:++frameSequence,at:Date.now()});}
-const receipt=count=>({confirmation:'UNVERIFIED',nativeQuiescence:'UNKNOWN',shots:0,files:[],observedTransfers:count});
+const receipt=records=>({confirmation:'UNVERIFIED',nativeQuiescence:'UNKNOWN',shots:0,files:records.map(file=>({path:file.path,transferId:file.context.transferId})),observedTransferIds:records.map(file=>file.context.transferId),observedTransfers:records.length});
 async function capture(args,operation){
   h1.captureCalls++;requireWorking();requireFileTransfer();route(args);
   const plan=nextCapture;nextCapture=defaultCapture();const number=++captureSequence;
@@ -127,15 +127,15 @@ async function capture(args,operation){
     if(args.burstMs){
       return await new Promise((resolve,reject)=>{
         held={mode:'burst',operationId:operation.operationId,number,resolve};
-        burstLatch=holdShutter({press:()=>{shutterCommands.push({operationId:operation.operationId,command:4,parameter:args.autofocus===false?0x10003:3,at:Date.now()});},release:()=>{servoControl.releaseAfterCapture(parameter=>shutterCommands.push({operationId:operation.operationId,command:4,parameter,at:Date.now()}));},onReleased:()=>{burstLatch=null;const pending=held;held=null;send({event:'burstReleased'});knownDeferred(emitTransfer({name:'burst-'+number,kind:'jpeg'}).then(()=>resolve(receipt(1)),reject));},onError:reject},args.burstMs);
+        burstLatch=holdShutter({press:()=>{shutterCommands.push({operationId:operation.operationId,command:4,parameter:args.autofocus===false?0x10003:3,at:Date.now()});},release:()=>{servoControl.releaseAfterCapture(parameter=>shutterCommands.push({operationId:operation.operationId,command:4,parameter,at:Date.now()}));},onReleased:()=>{burstLatch=null;const pending=held;held=null;send({event:'burstReleased'});knownDeferred(emitTransfer({name:'burst-'+number,kind:'jpeg'}).then(record=>resolve(receipt([record])),reject));},onError:reject},args.burstMs);
       });
     }
     if(plan.mode==='unknown')throw operationError('OPERATION_UNKNOWN_TERMINATION','Explicit synthetic unknown producer outcome.');
     if(plan.mode==='hold'||plan.mode==='hang')return await new Promise(resolve=>{held={mode:plan.mode,operationId:operation.operationId,number,resolve};send({event:'ic01-held',data:{operationId:operation.operationId,mode:plan.mode}});});
     if(plan.delayMs)await sleep(plan.delayMs);
-    await emitTransfer({name:'capture-'+number,kind:'jpeg'});
+    const record=await emitTransfer({name:'capture-'+number,kind:'jpeg'});
     if(plan.mode==='pair')knownDeferred((async()=>{await sleep(plan.secondDelayMs);await emitTransfer({name:'late-raw-'+number,kind:'raw'});})().catch(()=>{issues.push('IC01_DEFERRED_TRANSFER_FAILED');send({event:'transferIssue',data:{code:'IC01_DEFERRED_TRANSFER_FAILED'}});}));
-    return receipt(1);
+    return receipt([record]);
   }finally{contexts.settleCapture(operation.operationId,{outcome:'SYNTHETIC_OBSERVATION_ONLY'});}
 }
 async function release(args={}){
@@ -143,10 +143,10 @@ async function release(args={}){
   const pending=held;if(!pending)return {released:false,reason:'NO_HELD_SYNTHETIC_OPERATION'};
   if(pending.mode==='burst')return {released:false,reason:'USE_SHUTTER_RELEASE_PIPELINE'};
   if(pending.mode==='hang')return {released:false,reason:'EXPLICIT_UNRESPONSIVE_FAKE'};
-  held=null;let count=0;
-  if(args.jpeg!==false){await emitTransfer({name:'released-jpeg-'+pending.number,kind:'jpeg'});count++;}
-  if(args.raw===true){await emitTransfer({name:'released-raw-'+pending.number,kind:'raw'});count++;}
-  pending.resolve(receipt(count));return {released:true,observedTransfers:count};
+  held=null;const records=[];
+  if(args.jpeg!==false)records.push(await emitTransfer({name:'released-jpeg-'+pending.number,kind:'jpeg'}));
+  if(args.raw===true)records.push(await emitTransfer({name:'released-raw-'+pending.number,kind:'raw'}));
+  pending.resolve(receipt(records));return {released:true,observedTransfers:records.length};
 }
 function snapshot(){return {provider:'IC01_SYNTHETIC_JS_ONLY',generation,sessionEpoch,photoSequence,connected:state.connected,working:state.working,controlsOnly:state.controlsOnly===true,eventsRegistered:state.eventsRegistered===true,saveTo:state.saveTo??null,fenced,held:held?{mode:held.mode,operationId:held.operationId}:null,h1:{...h1},h2:{...h2,exposureWrites:h2.exposureWrites.map(item=>({...item}))},transfers:producer.snapshot(),operations:operations?.snapshot(),pendingCallbackJobs:deferredJobs.size,references:[...references.values()],files:fileRecords.map(item=>({...item})),denials:denials.map(item=>({...item})),issues:[...issues],messages:messageCount,nativeCalls:0,productCalls:{...productCalls},shutterCommands:shutterCommands.map(item=>({...item})),flash:flashControl.snapshot(),flashCommands:flashCommands.map(item=>({...item})),servo:servoControl.snapshot(),bulb:bulbControl.snapshot(),processId:process.pid,electronVersion:process.versions.electron};}
 async function setServoDelayed(enabled){requireWorking();if(!productControls)fail('IC01_SERVO_UNAVAILABLE');const pendingDelay=nextServoDelayMs;nextServoDelayMs=0;if(pendingDelay){state.servo={...servoControl.snapshot(),status:enabled?'starting':'stopping'};status();await sleep(pendingDelay);requireWorking();}return servoControl.set({enabled});}

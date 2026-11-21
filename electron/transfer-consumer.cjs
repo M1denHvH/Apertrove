@@ -13,7 +13,7 @@ function createTransferConsumer({generation,register,onIssue=()=>{}}){
     const replay=prior&&prior.path===data.path&&prior.sequence===sequence;
     if(replay&&prior.status!=='FAILED'){duplicates++;return prior.job||Promise.resolve();}
     if(prior&&!replay)issue('TRANSFER_ID_COLLISION');
-    const entry={path:data.path,sequence,status:'PENDING',job:null};
+    const entry={transferId:id,path:data.path,sequence,status:'PENDING',job:null};
     if(id){recent.set(id,entry);while(recent.size>128){const removable=[...recent].find(([,item])=>item.status!=='PENDING');if(!removable)break;recent.delete(removable[0]);}}
     if(!Number.isSafeInteger(sequence)||sequence<1)issue('PHOTO_SEQUENCE_INVALID');
     else if(!replay&&(sequence<=frontier||holes.has(sequence)))issue('PHOTO_SEQUENCE_REUSED');
@@ -29,6 +29,7 @@ function createTransferConsumer({generation,register,onIssue=()=>{}}){
     if(!replay)accepted++;
     const job=Promise.resolve().then(()=>register(data.path,frozen,data.capture===true)).then(result=>{
       if(result?.errors?.length){entry.status='FAILED';issue('TRANSFER_REGISTRATION_FAILED');}
+      else if(Array.isArray(result?.registered)&&!result.registered.some(photo=>photo.path===data.path))entry.status='SKIPPED';
       else{entry.status='COMMITTED';committed++;}
       return result;
     },()=>{entry.status='FAILED';issue('TRANSFER_REGISTRATION_FAILED');});
@@ -42,6 +43,7 @@ function createTransferConsumer({generation,register,onIssue=()=>{}}){
   }
   function snapshot(){return {generation,accepted,committed,duplicates,pending:pending.size,frontier,watermark,issues:[...issues]};}
   async function drain(){while(pending.size)await Promise.allSettled([...pending]);return {drained:true,...snapshot()};}
-  return {accept,fence,drain,snapshot};
+  const receipt=id=>{const entry=recent.get(id);return entry?{transferId:entry.transferId,path:entry.path,sequence:entry.sequence,status:entry.status}:null;};
+  return {accept,fence,drain,snapshot,receipt};
 }
 module.exports={createTransferConsumer};

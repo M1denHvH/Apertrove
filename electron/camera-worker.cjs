@@ -458,7 +458,7 @@ function settleCapture(){
   const waiting=captureWait;if(!waiting||waiting.latch?.isHolding())return;
   if(waiting.releaseUnknown){failCapture(operationError('OPERATION_UNKNOWN_TERMINATION','Shutter release could not be acknowledged.'));return;}
   clearTimeout(waiting.settle);if(!waiting.observedTransfers)return;
-  waiting.settle=setTimeout(()=>{if(captureWait!==waiting)return;captureWait=null;clearTimeout(waiting.timeout);transfers.settleCapture(waiting.operationId,{outcome:'OBSERVATION_WINDOW_DRAINED'});waiting.resolve({files:[],shots:0,observedTransfers:waiting.observedTransfers,confirmation:'UNVERIFIED',nativeQuiescence:'UNKNOWN',operationId:waiting.operationId});},waiting.quietMs);
+  waiting.settle=setTimeout(()=>{if(captureWait!==waiting)return;captureWait=null;clearTimeout(waiting.timeout);transfers.settleCapture(waiting.operationId,{outcome:'OBSERVATION_WINDOW_DRAINED'});waiting.resolve({files:waiting.observedFiles||[],observedTransferIds:(waiting.observedFiles||[]).map(file=>file.transferId),shots:0,observedTransfers:waiting.observedTransfers,confirmation:'UNVERIFIED',nativeQuiescence:'UNKNOWN',operationId:waiting.operationId});},waiting.quietMs);
 }
 
 function disconnect() {
@@ -610,7 +610,7 @@ function download(ref,folder,isCapture=false,context) {
     while(true) {target=path.join(folder,`${stem}${i?'_'+i:''}${ext}`);try {fs.writeFileSync(target,bytes,{flag:'wx'});break;}catch(e){if(e.code!=='EEXIST')throw e;i++;}}
     if(isCapture)evidence.capture=true;
     send({event:'photo',photoSequence:++photoSequence,data:{path:target,capture:isCapture,context:{...context,phase:'ORIGINAL_COMMITTED'}}});log('success',`Сохранено: ${path.basename(target)}`);
-    if(isCapture&&captureWait){shutterTrace('capture-event',{...captureWait.input,operationId:captureWait.operationId,servo:state.servo?.status});captureWait.observedTransfers++;send({event:'burstProgress',data:{shots:0,observedTransfers:captureWait.observedTransfers,confirmation:'UNVERIFIED'}});settleCapture();}
+    if(isCapture&&captureWait){shutterTrace('capture-event',{...captureWait.input,operationId:captureWait.operationId,servo:state.servo?.status});captureWait.observedFiles.push({path:target,transferId:context?.transferId,photoSequence});captureWait.observedTransfers++;send({event:'burstProgress',data:{shots:0,observedTransfers:captureWait.observedTransfers,confirmation:'UNVERIFIED'}});settleCapture();}
     return {path:target};
   } finally {if(!complete) sdk.cancel(ref);if(stream)releaseRef(stream,'download-stream-release');}
 }
@@ -620,7 +620,7 @@ function capture({autofocus=true,folder,burstMs=0,route,captureId,input},operati
   if(burstMs&&(![1,4,5].includes(get(0x401))||burstMs<100||burstMs>5000))throw Error('Выберите доступный серийный режим камеры. Максимальное удержание — 5 секунд.');
   setDeliveryRoute({route,folder});transfers.noteCapture({operationId:operation.operationId,captureId,sessionEpoch});
   return new Promise((resolve,reject)=>{
-    const driveMode=get(0x401);captureWait={resolve,reject,operationId:operation.operationId,observedTransfers:0,quietMs:quietPeriod(driveMode,get(0x406)),timeout:setTimeout(()=>failCapture(operationError('OPERATION_UNKNOWN_TERMINATION','Native capture completion is unverified after the producer deadline.')),driveMode===7?900000:75000)};
+    const driveMode=get(0x401);captureWait={resolve,reject,operationId:operation.operationId,observedTransfers:0,observedFiles:[],quietMs:quietPeriod(driveMode,get(0x406)),timeout:setTimeout(()=>failCapture(operationError('OPERATION_UNKNOWN_TERMINATION','Native capture completion is unverified after the producer deadline.')),driveMode===7?900000:75000)};
     let failure;const waiting=captureWait;waiting.input=input;
     const dispatch=(parameter,phase)=>{shutterTrace('sdk-dispatch',{...input,operationId:operation.operationId,command:4,parameter,servo:state.servo?.status,driveMode,worker:'capture'});try{const code=observed('EdsSendCommand',phase,()=>sdk.command(camera,4,parameter));shutterTrace('sdk-result',{...input,operationId:operation.operationId,command:4,parameter,code});return code;}catch(error){shutterTrace('sdk-error',{...input,operationId:operation.operationId,command:4,parameter,code:Number.isInteger(error?.code)?error.code:-1});throw error;}};
     const release=()=>{try{controls.releaseAfterCapture(param=>{if(!camera||dispatch(param,'release')!==0)throw operationError('OPERATION_UNKNOWN_TERMINATION','Shutter release could not be acknowledged.');});}catch{waiting.releaseUnknown=true;throw operationError('OPERATION_UNKNOWN_TERMINATION','Shutter release could not be acknowledged.');}};

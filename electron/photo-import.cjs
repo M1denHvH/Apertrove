@@ -14,7 +14,7 @@ function createPhotoImporter({getStore,commits,extensions,uniquePath,buildPhoto,
     // Import may wait for codec/file/persistence work while the active session
     // changes. The caller's delivery context owns this photo for the whole job.
     context=JSON.parse(JSON.stringify(context));
-    const result={added:0,skipped:0,errors:[]};const {sessionId,dest}=context;
+    const result={added:0,skipped:0,errors:[],registered:[]};const {sessionId,dest}=context;
     if(copy&&!dest)throw Error('Сначала выберите папку для снимков.');
     for(const source of files){
       let stage='source',target=source,copyAcknowledged=false,sourceAvailable=false,hint,fingerprint,registered=false;
@@ -23,7 +23,8 @@ function createPhotoImporter({getStore,commits,extensions,uniquePath,buildPhoto,
         await beforeRead(source);
         const stat=await fs.stat(source);if(!stat.isFile()){result.skipped++;continue;}sourceAvailable=true;
         fingerprint=await digest(source);
-        if(getStore().photos.some(photo=>context.cameraTransfer?photo.path===source&&photo.fingerprint===fingerprint:photo.fingerprint===fingerprint)){result.skipped++;continue;}
+        const existing=getStore().photos.find(photo=>context.cameraTransfer?photo.path===source&&photo.fingerprint===fingerprint:photo.fingerprint===fingerprint);
+        if(existing){result.skipped++;result.registered.push({id:existing.id,path:existing.path});continue;}
         if(copy){
           stage='copy';await fs.mkdir(dest,{recursive:true});
           hint=JSON.stringify([key(source),fingerprint,key(dest),sessionId??null]);
@@ -45,6 +46,7 @@ function createPhotoImporter({getStore,commits,extensions,uniquePath,buildPhoto,
           ...(sessionId&&!getStore().sessions.some(session=>session.id===sessionId)?{sessionAssociation:{status:'SESSION_REMOVED',sessionId}}:{})};
         stage='persist';const committed=await commits.registerPhoto(record,{cameraTransfer:!!context.cameraTransfer});
         if(hint)retained.delete(hint);
+        result.registered.push({id:committed.photo.id,path:committed.photo.path});
         if(!committed.added){result.skipped++;continue;}
         registered=true;result.added++;
         notify(onPhoto,committed.photo);

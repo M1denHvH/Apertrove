@@ -1,4 +1,4 @@
-import { t } from "./i18n.js";
+import { t, legacy } from "./i18n.js";
 import React,{useEffect,useRef,useState} from 'react';import {Camera,Square} from 'lucide-react';
 import {createShutterInput} from '../electron/shutter-input.cjs';
 export default function BurstShutter({job,disabled,onStart,onStop}){
@@ -20,5 +20,5 @@ export default function BurstShutter({job,disabled,onStart,onStop}){
   const stop=event=>owner.current.release(event.type);
   const keyDown=event=>{if(!['Space','Enter'].includes(event.code))return;event.preventDefault();event.stopPropagation();if(event.repeat||disabled||active)return;owner.current.press('keyboard',event.code);};
   const keyUp=event=>{if(!['Space','Enter'].includes(event.code))return;event.preventDefault();event.stopPropagation();owner.current.release('keyup',event.code);};
-  return <div className="native-burst-control"><button className="btn shutter" disabled={!holding&&(disabled||job?.status==='transferring')} aria-label={holding?t("burstShutter.release_to_stop"):t("burstShutter.hold_for_continuous_shooting")} onPointerDown={start} onPointerUp={stop} onPointerCancel={stop} onLostPointerCapture={stop} onKeyDown={keyDown} onKeyUp={keyUp} onBlur={stop}>{active||pressed?<Square size={16}/>:<Camera size={16}/>} {job?.status==='transferring'?t("burstShutter.saving_burst"):holding?t("burstShutter.release_to_stop"):t("burstShutter.hold_for_burst")}<kbd>Space</kbd></button><small role="status">{unconfirmed?t('operation.capture_unverified'):job?.status==='completed'?t("burstShutter.saved_photos", { v0: job.shots }):t("burstShutter.continuous_shooting_stops_after_5_s")}</small></div>;
+  return <div className="native-burst-control"><button className="btn shutter" title={t("burstShutter.continuous_shooting_stops_after_5_s")} disabled={!holding&&(disabled||job?.status==='transferring')} aria-label={holding?t("burstShutter.release_to_stop"):t("burstShutter.hold_for_continuous_shooting")} onPointerDown={start} onPointerUp={stop} onPointerCancel={stop} onLostPointerCapture={stop} onKeyDown={keyDown} onKeyUp={keyUp} onBlur={stop}>{active||pressed?<Square size={16}/>:<Camera size={16}/>} {job?.status==='transferring'?t("burstShutter.saving_burst"):holding?t("burstShutter.release_to_stop"):t("burstShutter.hold_for_burst")}<kbd>Space</kbd></button>{unconfirmed&&<small role="status">{t('operation.capture_unverified')}</small>}{job?.status==='failed'&&<small role="alert">{legacy(job.error)}</small>}</div>;
 }

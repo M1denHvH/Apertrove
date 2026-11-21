@@ -32,6 +32,8 @@ const {createExportService}=require('./export-service.cjs');
 const {previousPath}=require('./library-recovery.cjs');
 const {createOperationClient}=require('./operation-lifecycle.cjs');
 const {createTransferConsumer}=require('./transfer-consumer.cjs');
+const {captureDelivery}=require('./capture-delivery.cjs');
+const {createCameraCardActions}=require('./camera-card-actions.cjs');
 const {createShutdownCoordinator}=require('./shutdown-coordinator.cjs');
 const {createWorkerRetirement}=require('./runtime-replacement.cjs');
 const {shutterInput,createShutterDiagnostics}=require('./shutter-diagnostics.cjs');
@@ -52,6 +54,7 @@ let libraryBootstrap,servicesReady=false;
 let remote,remoteInfo={running:false,clients:0},commandRoutes,knownCameras=[],remoteStateTimer,desktopFrameInFlight=false,pendingDesktopFrame=null;
 let importQueue=Promise.resolve(),workerState=null;const assets=new Map(),applicationTasks=new Set(),workerChannels=new Set();
 let consumerRevision=0,importFailures=0;
+let cardActions;
 const lifecycleIssues=new Set();let diagnosticTail=Promise.resolve(),runtimeQuarantined=false;
 function lifecycleIssue(code){if(lifecycleIssues.size<32)lifecycleIssues.add(code);}
 let burst=null,series=null,sessionTransition=false,captureMetadata=null,focusPreview=null,accessoryBusy=false,controlBusy=false,servoTransition=null,captureQueued=false,pendingBurstStart=null,bulbStarting=null,bulbStopping=null;
@@ -190,6 +193,7 @@ function startWorker(){
     // A late saved file remains accounted for even if its session/worker is old.
     if(m.event==='shutterDiagnostic'){if(source===worker)shutterTrace(m.data?.phase,m.data);return;}
     if(m.event==='photo'){void channel.consumer.accept(m);return;}
+    if(m.event==='cardExportProgress'){if(source===worker&&m.sessionEpoch===channel.nativeEpoch)cardActions?.progress(m.data);return;}
     if(m.event==='nativeObservation'||m.event==='transferIssue'){channel.issue=true;if(m.event==='nativeObservation'){channel.nativeIssue=true;runtimeQuarantined=true;lifecycleIssue('NATIVE_RESULT_UNKNOWN');}else lifecycleIssue('TRANSFER_RESULT_UNKNOWN');log('error',t('operation.transfer_issue'));return;}
     if(!['status','burstReleased','burstProgress','focusInfo','focusPreview','frame','log'].includes(m.event))return;
     if(source!==worker||!Number.isSafeInteger(m.sessionEpoch)||m.sessionEpoch<channel.nativeEpoch)return;
@@ -256,14 +260,14 @@ function queueImport(files,copy=true,cameraTransfer=false,explicitContext){
 function capture(args={},metadata=null){return trackApplication(captureOnce(args,metadata));}
 async function captureOnce(args={},metadata=null){
   if(quitting)throw Error(t('operation.closed'));
-  requireSession();if(!store.settings.captureFolder)throw Error('Выберите папку съёмки.');if(captureActive)throw Error('Предыдущий кадр ещё сохраняется.');
+  if(!store.settings.captureFolder)throw Error('Выберите папку съёмки.');if(captureActive)throw Error('Предыдущий кадр ещё сохраняется.');
   const delivery=Object.freeze(transferRoute()),captureId=crypto.randomUUID();
   const equipment={camera:camera.model,lens:camera.equipment?.lensName};
   captureActive=true;captureMetadata=metadata;emit('captureState',{active:true});
   try{
-    const source=workerState,result=await call('capture',{autofocus:store.settings.autofocus,...args,folder:delivery.destination,captureId,route:delivery});
+    const source=workerState,nativeResult=await call('capture',{autofocus:store.settings.autofocus,...args,folder:delivery.destination,captureId,route:delivery});
     await source.consumer.drain();
-    if(source.consumer.snapshot().issues.includes('TRANSFER_REGISTRATION_FAILED'))throw Error(t('operation.transfer_issue'));
+    const result=captureDelivery(nativeResult,source.consumer);
     if(result.confirmation==='CONFIRMED'){store.equipmentStats??={};for(const key of [`camera:${equipment.camera}`,`lens:${equipment.lens}`])store.equipmentStats[key]=(store.equipmentStats[key]||0)+(result.shots||0);}
     else log('info',t('operation.capture_unverified'));
     const session=store.sessions.find(s=>s.id===delivery.sessionId);if(session)session.updated=new Date().toISOString();await persist();return result;
@@ -296,6 +300,10 @@ function validatePreset(p){
   return {id:typeof p.id==='string'?p.id:crypto.randomUUID(),name:p.name.trim(),description:String(p.description||'').slice(0,300),color:['sage','sand','blue','rose'].includes(p.color)?p.color:'sage',values};
 }
 function installHandlers(){
+  cardActions=createCameraCardActions({call,getChannel:()=>workerState,newId:()=>crypto.randomUUID(),translate:t,emit,
+    choose:()=>choose(['openDirectory','createDirectory'],t('card.choose_destination')),
+    importFiles:(files,context)=>queueImport(files,false,false,context),
+    exclusive:fn=>trackApplication((async()=>{cameraIdle();controlBusy=true;remote?.publishState();try{return await fn();}finally{controlBusy=false;remote?.publishState();}})())});
   const saveOnboarding=async patch=>{
     store.settings.onboarding=onboardingState({...store.settings.onboarding,...patch});
     await persist();
@@ -326,6 +334,7 @@ function installHandlers(){
   });
   const handlers={
     boot:()=>bootApplication(),
+    cardList:args=>cardActions.cardList(args),cardThumbnail:args=>cardActions.cardThumbnail(args),cardExport:args=>cardActions.cardExport(args),cardExportCancel:args=>cardActions.cardExportCancel(args),
     listCameras:()=>withRuntime(async sdkDir=>{knownCameras=await call('listCameras',{sdkDir});emit('cameras',knownCameras);return knownCameras;}),
     connect:({cameraId}={})=>connectCamera({cameraId}),
     disconnect:()=>{cameraIdle({allowServo:true,allowBulb:true});return call('disconnect');},live:a=>cameraCommand('live',a),property:a=>cameraCommand('property',a),focus:a=>cameraCommand('focus',a),autofocus:()=>{cameraIdle();focusPreview=null;emit('focusPreview',null);return cameraCommand('autofocus',{preview:store.settings.focusPreviewOnSuccess!==false});},
@@ -553,7 +562,7 @@ function ensureReadyServices(){
     canRead:()=>!sessionTransition&&!quitting,
     trackRead:job=>{previewTasks.add(job);job.then(()=>previewTasks.delete(job),()=>previewTasks.delete(job));return job;}
   });
-  if(!remote)remote=createRemoteServer({getState:remoteState,command:async(name,args)=>{if(quitting)throw Error(t('operation.closed'));const result=await commandRoutes[name](args);if(['connect','disconnect','live','property'].includes(name))return remoteState().camera;if(name==='capture')return {captured:result.confirmation==='CONFIRMED',accepted:true,confirmation:result.confirmation,observedTransfers:result.observedTransfers,files:result.files?.map(f=>path.basename(f))};return result;},getPhoto:async id=>{const p=store.photos.find(p=>p.id===id);return p?.thumbPath?fs.readFile(p.thumbPath):null;},log,onClients:info=>{remoteInfo=info.running?{...remoteInfo,...info}:{running:false,clients:0};emit('remote',remoteInfo);}});
+  if(!remote)remote=createRemoteServer({getState:remoteState,command:async(name,args)=>{if(quitting)throw Error(t('operation.closed'));const result=await commandRoutes[name](args);if(['connect','disconnect','live','property'].includes(name))return remoteState().camera;if(name==='capture')return {captured:result.confirmation==='CONFIRMED',accepted:true,confirmation:result.confirmation,observedTransfers:result.observedTransfers,files:result.files?.map(f=>path.basename(f.path))};return result;},getPhoto:async id=>{const p=store.photos.find(p=>p.id===id);return p?.thumbPath?fs.readFile(p.thumbPath):null;},log,onClients:info=>{remoteInfo=info.running?{...remoteInfo,...info}:{running:false,clients:0};emit('remote',remoteInfo);}});
   if(!worker)startWorker();
   servicesReady=true;
 }
