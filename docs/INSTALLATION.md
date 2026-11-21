@@ -1,37 +1,35 @@
 # Install Apertrove
 
-## 1. Download and verify
+## Download and open the portable app
 
-Download `Apertrove-0.10.3-Windows-x64.zip` and `SHA256SUMS.txt` from the same GitHub release. In PowerShell, open the download folder and run:
+1. Open the [0.10.3 release on GitHub](https://github.com/M1denHvH/Apertrove/releases/tag/Release). Download `Apertrove-0.10.3-Windows-x64.zip` and `SHA256SUMS.txt` from that release.
+2. In PowerShell, go to your downloads folder and calculate the ZIP’s SHA-256. Compare it with the line for the same ZIP in `SHA256SUMS.txt`. Download the ZIP again if the values differ.
 
-```powershell
-Get-FileHash -Algorithm SHA256 -LiteralPath '.\Apertrove-0.10.3-Windows-x64.zip'
-```
+   ```powershell
+   Get-FileHash -Algorithm SHA256 -LiteralPath '.\Apertrove-0.10.3-Windows-x64.zip'
+   ```
 
-Compare the hash with the line for that ZIP in `SHA256SUMS.txt`. If it differs, download a fresh copy from the release page.
+3. Extract the whole ZIP to a folder you can write to. Open `Apertrove.exe` in the extracted application folder and keep its files and subfolders together. The portable app is unsigned, so Windows can show a reputation prompt. Follow your organization’s policy if Windows blocks it.
 
-## 2. Extract and open
+The download is a published snapshot. The latest changes on `main` are available by [building from source](../README.md#develop). See [system requirements](REQUIREMENTS.md) for the tested Windows and Canon combinations.
 
-Extract the ZIP to a folder you can write to, such as Documents. Open `Apertrove.exe` inside the extracted folder. The release is portable and unsigned. Windows may show a Microsoft Defender SmartScreen reputation prompt. Follow your organization’s security policy if the executable is blocked. Keep the executable, `resources`, `locales` and the other files together.
+## Set up Apertrove without a camera
 
-Windows x64 is required. The release was checked on Windows 10 x64. Windows 11 x64 is a target pending a clean-machine test. [System requirements](REQUIREMENTS.md)
+Choose your language and appearance on the welcome page. You can skip Canon setup and use **Sessions**, **Library**, and **Lighting Studio**. Choose a writable folder with room for your photos, then create a session and use **Import** to add existing files. You can reopen the setup wizard under **Settings** → **Setup and diagnostics** → **Setup guide**.
 
-## 3. Set up Canon components
+![Welcome page in the Apertrove setup wizard](screenshots/welcome.png)
 
-For camera control, install official Canon software for your exact model and region that supplies compatible x64 EDSDK components, or obtain the SDK through the [Canon developer program](https://www.usa.canon.com/support/sdk). [EOS Utility](https://www.usa.canon.com/support/eos-utilities) and Picture Style Editor are potential sources; availability, architecture and terms vary by release. Apertrove does not bundle or download Canon DLLs or proprietary headers.
+## Set up Canon EDSDK
 
-Apertrove checks standard Canon installation directories, including EOS Utility and Picture Style Editor under Program Files. You can also select the folder containing a compatible `EDSDK.dll`. Keep that official installation and its dependencies intact; do not copy a DLL from another installation or an unofficial download site. A 32-bit DLL cannot load in the x64 app.
+Install official Canon software that supplies a compatible **x64 EDSDK** for your model and region, or obtain the SDK through Canon’s developer program. EOS Utility and Picture Style Editor may supply it depending on the release. Canon provides the runtime separately from Apertrove. Keep the official installation and its dependencies together. [Canon EOS Utility](https://www.usa.canon.com/support/eos-utilities) · [Canon SDK](https://www.usa.canon.com/support/sdk)
 
-On 21 November 2026, one PSE x64 runtime, file version 3.18.40.0, passed N2 initialize/terminate with raw codes `0`/`0`. H1A counted one camera with an EOS 2000D connected over USB. A separately authorized H1 attempt subsequently read firmware 1.3.0, the Sigma 17–70mm lens, battery 80% and exposure settings; session/lifecycle returns were zero and worker/Electron cleanup was confirmed. The raw H1 result remains **UNKNOWN** because a strict module-location filter flagged five NVIDIA DriverStore DLLs; all five signatures were Valid in post-run checks. The earlier pre-SDK launcher failure remains recorded. H2 recorded descriptor-backed exposure restoration, 1056×704 Live View around 27.5 FPS, histogram ON/OFF and separately authorized AF/near/far command acceptance with focus unverified; [H2 evidence](H2_VALIDATION.md) preserves the first UNKNOWN and later recorded continuation. H3 remains untested. [Compatibility evidence](HARDWARE_COMPATIBILITY.md) records the exact identities, commits and limits; these results do not qualify all PSE versions or camera operations.
+Apertrove looks in common Canon installation directories. In setup, use **Choose SDK folder** to point Apertrove to the folder containing `EDSDK.dll`, then select **Check again**. You can also set the path under **Settings** → **Canon connection** → **Custom EDSDK x64 folder · optional**. **Canon library loaded** confirms that Apertrove can load the selected runtime. Check the camera separately to see what it reports. [Troubleshooting](TROUBLESHOOTING.md)
 
-Use the diagnostic screen to confirm that the library loads. If the SDK is missing or incompatible, you can skip camera setup and use sessions, local import, and Lighting Studio.
+## Check and connect the camera
 
-## 4. Connect and check qualification
+1. Exit EOS Utility and any other app that could be using the camera. Turn the camera on, use its USB connection mode if applicable, and plug it directly into the PC with a USB data cable.
+2. Open **Settings** → **Setup and diagnostics** → **Camera diagnostics**. Choose **Find cameras**, select the model, then select **Check capabilities**. This is a read-only camera check. For runtime problems, choose **Check SDK**.
+3. Finish diagnostics before opening a working camera connection. To connect from the main app, open **Choose camera** in the header and choose your camera. For the preview, open a session and go to **Capture**.
+4. The setup wizard’s shooting connection can also configure **Card and computer** or **Computer only**, subject to camera support. Real shutter and file handoff are still unqualified. Use [local file import](USER_GUIDE.md#sessions-and-library) for existing photos and keep a separate copy of any important originals.
 
-1. Exit EOS Utility, Picture Style Editor and any other camera host, including tray launchers that open a connection. A Canon Webcam Utility background service can also hold the camera; see [troubleshooting](TROUBLESHOOTING.md).
-2. Turn on the camera and connect it directly with a USB data cable.
-3. Choose **Find cameras** in Apertrove and select the detected camera.
-4. Create a session, pick a writable output folder, and select a destination that includes the computer if you want incoming files in Apertrove.
-5. Check the [current qualification status](HARDWARE_COMPATIBILITY.md) before using camera controls. Capture and durable camera handoff remain unqualified while DATA-005 is open. This baseline issue does not itself block review of verified controls/read-only/UI changes; final merge still needs the agreed scope, checks and user confirmation. Use local import for existing photos, and reserve new isolated test frames for an explicitly scoped capture test.
-
-Keep the application and your photo folders separate. Before replacing a portable build, back up the original photos and local Apertrove/Focal Studio application data. [Troubleshooting](TROUBLESHOOTING.md)
+Back up your originals and local Apertrove profile before replacing a portable build. Older installations may use a Focal Studio profile. See [current camera support](REQUIREMENTS.md#camera-support) and [how to recover from a setup or library error](TROUBLESHOOTING.md).

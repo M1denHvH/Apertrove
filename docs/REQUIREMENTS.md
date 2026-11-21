@@ -2,22 +2,24 @@
 
 | Component | Requirement |
 | --- | --- |
-| Operating system | Windows 10 x64 was tested on build 19045. Windows 11 x64 is a target pending a clean-machine test. Use a Windows installation that still receives your organization’s security updates. |
-| Architecture | Native x64 Windows package. There are no x86 or ARM64 builds. |
-| Storage | Allow room for the extracted app, the ZIP during extraction, local previews and your session originals. RAW plus JPEG uses more space than JPEG alone. |
-| Camera control | Compatible x64 Canon EDSDK components installed separately by the user and a USB data connection. Official Canon software, including EOS Utility or Picture Style Editor, can supply a suitable runtime depending on the release. |
-| Web Remote | A mobile or desktop browser on a trusted local network with access to the host’s selected private interface. |
-| Development | Windows x64, Node.js 24 with npm, and Git for cloning. An SDK is optional for builds and mock tests. |
+| Operating system | Windows x64. The published portable build was tested on Windows 10 x64, build 19045. A clean installation of Windows 11 x64 is still pending verification. |
+| Architecture | The Windows package is x64. There are no x86 or ARM64 packages. |
+| Storage | Allow space for the ZIP, the extracted application, the local profile and previews, and your session originals. |
+| Camera connection | USB data cable and compatible 64-bit Canon EDSDK installed separately. Camera availability also depends on the body, firmware, lens, and shooting mode. |
+| Web Remote | A browser on a trusted LAN that can reach the PC’s selected network interface. Apertrove uses HTTP and WebSocket for the remote. |
+| Source builds | Windows x64, Git, npm and Node.js 24 as used by CI. Building and using the library without a camera do not require Canon EDSDK. |
 
-Current controlled evidence includes N2 lifecycle without a camera (init=0, terminate=0), H1A count-only enumeration with an **EOS 2000D over USB** (one camera, five raw zero returns), and an explicitly authorized read-only H1 cycle. H1 read firmware **1.3.0**, the Sigma 17–70mm lens, battery **80%**, and **M / ISO 400 / f/22 / 1/320 / Auto WB**. Session/lifecycle returns were zero; natural worker/Electron exit and an empty supervised Job tree were confirmed. The raw runner outcome remains **UNKNOWN** after five NVIDIA DriverStore module-location findings, with Valid signatures observed in post-run checks. The earlier blocked launcher attempt is retained separately. H2 has recorded exposure restoration, Live View/histogram and separate AF/near/far command acceptance, with optical focus unverified; see [the separate H2 receipts](H2_VALIDATION.md). H3 remains NOT RUN. Exact source/addon identities and limits are in [hardware compatibility evidence](HARDWARE_COMPATIBILITY.md).
+## Camera support
 
-| Tested runtime identity | Value |
+Recorded hardware observations cover one **Canon EOS 2000D** over USB with firmware **1.3.0**, a **Sigma 17–70mm F2.8–4 DC MACRO OS HSM Contemporary C013**, and **Picture Style Editor x64 EDSDK 3.18.40.0**. The runtime and camera combination determines the controls available on your system. See the [complete compatibility evidence](HARDWARE_COMPATIBILITY.md) for the exact runtime fingerprint and test results.
+
+| Feature | Observed status |
 | --- | --- |
-| Architecture / file version | x64 / 3.18.40.0 |
-| SHA-256 | `35c5fd7564cf8eee3bc41004a0ab21d96caccb36ea1a1ddb512caf7b1c046627` |
-| Observation date | 21 November 2026 |
-| Observed scope | Lifecycle, count-only enumeration and one real read-only H1 cycle with confirmed process cleanup. H1 raw UNKNOWN is preserved for its module-location finding. H2 exposure changes/restoration and Live View/histogram were observed; AF/lens commands were accepted without optical proof. Capture/transfer remain unqualified. DATA-005 is an unchanged baseline limitation for H3/release claims, not an automatic ban on safe scoped merges. |
+| Connect and inspect | Camera enumeration, opening a read-only session, reading camera settings and reporting supported choices were observed. The aggregate H1 report remains **UNKNOWN** for its module-location finding. |
+| Exposure | Changes to ISO, shutter speed and aperture were verified and restored in the controls-only session. Other settings and modes depend on the reported camera capabilities. |
+| Live View | 1056×704 preview at about 27.5 FPS and switching the software RGB histogram on and off were recorded in that setup. |
+| Focus | The SDK accepted AF on/off and near/far lens commands. Optical focus acquisition and physical lens movement remain unverified. |
+| Shutter, capture and camera file transfer | Implemented on supported connections but not yet qualified on hardware. H3 has not run. DATA-005 remains open: Apertrove sends Canon's download-complete acknowledgement before local writing and library registration. |
+| Electron security | The main window’s Content Security Policy remains an open item (SEC-004). Use Web Remote on a trusted private LAN. [Security](../SECURITY.md) |
 
-The result applies to these bytes, not every file carrying the same version number or every PSE release. Other user-installed compatible EDSDK runtimes remain candidates; Apertrove does not redistribute Canon binaries or headers. Camera compatibility and supported controls depend on the body, lens, firmware and dial position. Built-in flash popup also depends on a compatible Windows WIA operation. Apertrove’s camera connection is USB. Web Remote connects the phone to the PC over the LAN.
-
-Canon’s compatibility tables cover the SDK. Use Apertrove’s diagnostics to check the integration with your setup. [Canon SDK](https://www.usa.canon.com/support/sdk) · [Canon compatibility and release notes](https://asia.canon/en/campaign/developerresources/camera/cap/edsdk-eos-digital-camera-sdk-release-note) · [Apertrove SDK audit](EDSDK_AUDIT.ru.md)
+Other bodies, lenses and runtime versions need their own compatibility checks. Canon’s compatibility tables describe the SDK. Apertrove’s **Camera diagnostics** shows what your setup reports. Direct Wi-Fi camera control, video recording and software-controlled Bulb timing are outside the current feature set. [Canon SDK](https://www.usa.canon.com/support/sdk) · [Canon SDK compatibility and release notes](https://asia.canon/en/campaign/developerresources/camera/cap/edsdk-eos-digital-camera-sdk-release-note)
