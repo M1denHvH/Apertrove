@@ -75,7 +75,7 @@ function load(source,ports,exports){const context=vm.createContext(ports,{codeGe
 
 test('worker orientation adapter uses exact documented buffer/command shapes and no EXIF ref',()=>{
   const calls=[],ref={opaque:'camera'},evf={opaque:'evf'},state={capabilities:{}};
-  const context=load(section('function orientationCall(','\nconst bulb='),{
+  const context=load(section('function orientationCall(','\nlet bulb='),{
     createLiveOrientation,ORIENTATION,state,Buffer,camera:ref,live:true,status:()=>{},isUnsupportedCommand:code=>[1,7,0x2005].includes(code),
     observed:(_method,phase,fn)=>{calls.push(phase);return fn();},sdk:{
       set:(camera,property,param,size,data)=>{assert.equal(camera,ref);assert.equal(property,0x01000000);assert.equal(param,0x05b3740d);assert.equal(size,4);assert.equal(data.readUInt32LE(),0x01000544);return 0;},
@@ -111,7 +111,7 @@ test('worker enables posture only before a fresh non-diagnostic OpenSession',asy
       controls:{isBusy:()=>false,servoConnected:()=>{}},transferProducer:{drain:async()=>{}},setDeliveryRoute:()=>{},load:()=>{},
       listCameras:()=>[selected],selectCamera:()=>selected,describeCamera:()=>selected,releaseRef:()=>true,check:code=>assert.equal(code,0),
       openCameraSession:()=>calls.push('open'),textProperty:()=>model,modelCapabilities:()=>({capture:true}),log:()=>{},refresh:()=>({}),prepareWorkingSession:()=>({}),disconnect:()=>{},
-      fileVersion:async()=>{calls.push('file-version');return '3.18.40.0';},liveOrientation:orientation,status:()=>({})
+      prepareAccessories:async()=>{},closeCamera:async()=>{},fileVersion:async()=>{calls.push('file-version');return '3.18.40.0';},liveOrientation:orientation,status:()=>({})
     },['connect']);
     await context.connect({cameraId:'synthetic',readOnly,folder:'synthetic'});
     assert.equal(calls.includes('orientation-enable'),enabled);

@@ -83,7 +83,7 @@ test('control-only Live View stop reads actual AF state after restore and keeps 
     const state={working:true,controlsOnly:true,model:'synthetic',properties:{},capabilities:{liveView:true},liveOrientation:{available:false}};let context,started=false;
     const source=section(worker,'function refresh()','\nfunction listCameras(')+section(worker,'const status =','\nconst errors=')+section(worker,'function restoreLiveView()','\nfunction readFocus')+comparison;
     context=load(source,{
-      state,camera:{},restricted:false,PROPS,choices,WHITE_BALANCE_COLOR_TEMPERATURE,live:false,evfRestore:null,
+      state,camera:{},accessorySupport:{},sessionEventsRegistered:false,restricted:false,PROPS,choices,WHITE_BALANCE_COLOR_TEMPERATURE,live:false,evfRestore:null,
       get:id=>{const value=id===PROPS.afMode?(context.live?0:started?finalAF:2):(values.get(id)??0);actions.push({kind:'read',id,value});return value;},
       set:(id,value)=>{assert.notEqual(id,PROPS.afMode);actions.push({kind:'write',id,value});values.set(id,value);if(id===0x500&&(value&2))started=true;},
       readData:()=>null,textProperty:()=>'',sdk:{desc:(_camera,_id,out)=>{out.values=[0,1,2];out.count=3;return 0;}},

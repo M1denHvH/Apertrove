@@ -1,4 +1,5 @@
-// No mechanical flash-popup command is qualified for the installed Canon SDK.
+// Retired compatibility exports deny all commands. Production popup runs inside
+// camera-worker.cjs through its fingerprint- and model-qualified native profile.
 // FlashOn describes a captured image; Flash_Firing controls firing settings.
 // Neither establishes a supported mechanism for raising a built-in flash.
 const REASON='FLASH_POPUP_PROTOCOL_UNQUALIFIED';

@@ -17,8 +17,6 @@ const {deletePhotos}=require('./photo-delete.cjs');
 const {prepareSeries,runSeries}=require('./preset-series.cjs');
 const {equipmentCards,loadProduct,identify}=require('./equipment.cjs');
 const {productMedia}=require('./product-media.cjs');
-const {createFlashBridge,flashAvailability}=integration?.flash||require('./flash-bridge.cjs');
-const flashBridge=createFlashBridge();
 const {composition:normalizeComposition,workspace:normalizeWorkspace}=require('./workspace-settings.cjs');
 const {readMetadata}=require('./metadata.cjs');
 const {createShotInspector}=require('./shot-inspector.cjs');
@@ -56,15 +54,15 @@ let importQueue=Promise.resolve(),workerState=null;const assets=new Map(),applic
 let consumerRevision=0,importFailures=0;
 const lifecycleIssues=new Set();let diagnosticTail=Promise.resolve(),runtimeQuarantined=false;
 function lifecycleIssue(code){if(lifecycleIssues.size<32)lifecycleIssues.add(code);}
-let burst=null,series=null,sessionTransition=false,captureMetadata=null,focusPreview=null,accessoryBusy=false,controlBusy=false,servoTransition=null,captureQueued=false,pendingBurstStart=null;
+let burst=null,series=null,sessionTransition=false,captureMetadata=null,focusPreview=null,accessoryBusy=false,controlBusy=false,servoTransition=null,captureQueued=false,pendingBurstStart=null,bulbStarting=null,bulbStopping=null;
 const burstActive=()=>burst&&['holding','transferring'].includes(burst.status);
 const seriesActive=()=>series&&['running','stopping','restoring'].includes(series.status);
 const servoActive=()=>camera.connected&&(camera.servo?.enabled===true||camera.servo?.enabled===null||['starting','running','stopping'].includes(camera.servo?.status));
 const servoCaptureBlocked=()=>servoActive()&&!(camera.servo?.enabled===true&&camera.servo?.status==='running');
-const bulbActive=()=>['starting','exposing','stopping'].includes(camera.bulb?.status)||camera.bulb?.status==='error'&&camera.bulb?.confirmation==='unknown';
+const bulbActive=()=>camera.connected&&(['starting','exposing','stopping'].includes(camera.bulb?.status)||camera.bulb?.status==='error'&&camera.bulb?.confirmation==='unknown');
 function requireSession(){if(!store.sessions.some(s=>s.id===store.sessionId))throw Error('Создайте или откройте фотосессию.');}
 function nativeOwned(){return !!workerState&&!workerState.exited&&(workerState.rpc.hasOutstanding()||!workerState.rpc.snapshot().admissionOpen);}
-function cameraIdle({allowServo=false}={}){if(runtimeQuarantined)throw Error(t('operation.unknown'));if(quitting||nativeOwned()||bulbActive()||!allowServo&&servoActive()||seriesActive()||burstActive()||interval||captureActive||sessionTransition||accessoryBusy||controlBusy)throw Error('Дождитесь окончания текущей команды камеры.');}
+function cameraIdle({allowServo=false,allowBulb=false}={}){if(runtimeQuarantined)throw Error(t('operation.unknown'));if(quitting||nativeOwned()||!allowBulb&&bulbActive()||!allowServo&&servoActive()||seriesActive()||burstActive()||interval||captureActive||sessionTransition||accessoryBusy||controlBusy)throw Error('Дождитесь окончания текущей команды камеры.');}
 async function cameraCommand(method,args){cameraIdle({allowServo:['servo','live','property'].includes(method)});controlBusy=true;remote?.publishState();try{return await call(method,args);}finally{controlBusy=false;remote?.publishState();}}
 function setServo(enabled){
   if(typeof enabled!=='boolean')throw Error('Некорректное состояние AI Servo.');
@@ -113,6 +111,27 @@ function burstFromControl({seconds=5,input:rawInput}={}){
     }).catch(error=>{burst={...burst,status:'failed',error:error.message};emit('burst',burst);log('error',error.message);}));
     return {...burst};
   }).finally(()=>{if(pendingBurstStart===intent)pendingBurstStart=null;});
+}
+function startBulbFromControl(){
+  requireSession();if(!store.settings.captureFolder)throw Error('Выберите папку съёмки.');
+  if(bulbStarting||bulbStopping)throw Error(t('operation.busy'));
+  const channel=workerState,epoch=channel?.nativeEpoch;
+  const args={autofocus:store.settings.autofocus,folder:store.settings.captureFolder,captureId:crypto.randomUUID(),route:Object.freeze(transferRoute())};
+  const promise=cameraCommand('bulbStart',args),owner={channel,epoch,promise};bulbStarting=owner;
+  const clear=()=>{if(bulbStarting===owner)bulbStarting=null;};promise.then(clear,clear);return promise;
+}
+function stopBulbFromControl(){
+  if(bulbStopping)return bulbStopping;
+  const owner=bulbStarting,channel=owner?.channel||workerState,epoch=owner?.epoch??channel?.nativeEpoch;
+  const promise=(async()=>{
+    // A failed start may still owe a native end. Wait for its cleanup to settle,
+    // then honour the explicit stop in the same session even after rejection.
+    if(owner)try{await owner.promise;}catch{}
+    if(!channel||channel.exited)return camera.bulb||camera;
+    if(workerState!==channel||channel.nativeEpoch!==epoch)throw Object.assign(Error(t('operation.stale')),{code:'OPERATION_STALE_SESSION'});
+    const result=await call('bulbStop');await channel.consumer.drain();return result;
+  })();
+  bulbStopping=promise;const clear=()=>{if(bulbStopping===promise)bulbStopping=null;};promise.then(clear,clear);return promise;
 }
 function sessionIdle(allowWatcher=false){if(quitting||nativeOwned()||bulbActive()||servoActive()||accessoryBusy||controlBusy||seriesActive()||burstActive()||interval||captureActive||watcher&&!allowWatcher||sessionTransition)throw Error('Остановите текущую съёмку и автоимпорт перед сменой фотосессии.');}
 const sessionsRoot=()=>path.join(process.env.FOCAL_TEST_DATA?path.join(process.env.FOCAL_TEST_DATA,'Pictures'):app.getPath('pictures'),'Apertrove');
@@ -309,12 +328,12 @@ function installHandlers(){
     boot:()=>bootApplication(),
     listCameras:()=>withRuntime(async sdkDir=>{knownCameras=await call('listCameras',{sdkDir});emit('cameras',knownCameras);return knownCameras;}),
     connect:({cameraId}={})=>connectCamera({cameraId}),
-    disconnect:()=>{cameraIdle({allowServo:true});return call('disconnect');},live:a=>cameraCommand('live',a),property:a=>cameraCommand('property',a),focus:a=>cameraCommand('focus',a),autofocus:()=>{cameraIdle();focusPreview=null;emit('focusPreview',null);return cameraCommand('autofocus',{preview:store.settings.focusPreviewOnSuccess!==false});},
+    disconnect:()=>{cameraIdle({allowServo:true,allowBulb:true});return call('disconnect');},live:a=>cameraCommand('live',a),property:a=>cameraCommand('property',a),focus:a=>cameraCommand('focus',a),autofocus:()=>{cameraIdle();focusPreview=null;emit('focusPreview',null);return cameraCommand('autofocus',{preview:store.settings.focusPreviewOnSuccess!==false});},
     servo:({enabled}={})=>setServo(enabled),
-    bulbStart:args=>cameraCommand('bulbStart',args),
-    bulbStop:()=>worker?call('bulbStop'):camera,
-    flashSupport:async()=>flashAvailability(camera,camera.connected?await flashBridge.cached(camera.model):{}),
-    flashPopup:async()=>{cameraIdle();if(!camera.connected)throw Error('Сначала подключите камеру.');return flashBridge.popup(camera.model);},
+    bulbStart:startBulbFromControl,
+    bulbStop:stopBulbFromControl,
+    flashSupport:()=>camera.connected&&camera.flash?{...camera.flash,available:camera.capabilities?.flashPopup===true&&camera.flash.available===true,canAttempt:camera.capabilities?.flashPopup===true&&camera.flash.canAttempt===true}:{available:false,canAttempt:false,accepted:false,raised:null,reason:'FLASH_POPUP_PROTOCOL_UNQUALIFIED'},
+    flashPopup:()=>cameraCommand('flashPopup'),
     capture:captureFromControl,
     chooseFolder:async({kind})=>{if(!['captureFolder','watchFolder','sdkDir'].includes(kind))throw Error('Неизвестная папка.');if(kind==='sdkDir')return chooseSdkFolder();if((kind==='captureFolder'&&(captureActive||interval||watcher))||(kind==='watchFolder'&&watcher))throw Error('Сначала остановите текущую операцию.');const dir=await choose(['openDirectory','createDirectory'],'Выберите папку');if(dir){if(kind==='captureFolder'){requireSession();sessionIdle();if(camera.connected)await call('destination',{folder:dir});store.sessions.find(s=>s.id===store.sessionId).captureFolder=dir;}store.settings[kind]=dir;await persist();emit('settings',store.settings);}return dir;},
     importFiles:()=>sessionAction(async()=>{requireSession();const res=await dialog.showOpenDialog(win,{title:ltext('Импорт фотографий'),properties:['openFile','multiSelections'],filters:[{name:ltext('Фотографии и RAW'),extensions:[...L.EXTENSIONS].map(s=>s.slice(1))}]});return res.canceled?null:queueImport(res.filePaths,true);},{allowWatcher:true}),
@@ -474,6 +493,7 @@ const shutdown=createShutdownCoordinator({
     channel.rpc.cancelAll();
     if(channel.rpc.snapshot().terminated){channel.process.postMessage({type:'emergencyRelease',generation:channel.generation});return;}
     await call('burstStop',{}, {timeoutMs:1000});
+    await call('bulbStop',{}, {timeoutMs:1000});
   },
   fenceProducers:async({deadline})=>{
     await drainApplicationTasks();const channel=workerState;

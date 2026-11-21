@@ -26,6 +26,12 @@ test('disconnect retains an unknown result; shutdown best-effort ends and unlock
   const r=rig();await r.control.start();const state=r.control.disconnected();assert.equal(state.confirmation,'unknown');assert.equal(state.status,'error');assert.equal(r.control.isBusy(),true);await assert.rejects(r.control.start());
   const active=rig();await active.control.start();await active.control.shutdown();assert.deepEqual(active.calls,['lock','start','end','unlock']);
 });
+
+test('repeated disconnect notifications preserve an unknown exposure without sending more native commands',async()=>{
+  const r=rig();await r.control.start();const calls=r.calls.length;
+  r.control.disconnected();r.control.disconnected();await r.control.shutdown();
+  assert.equal(r.control.snapshot().status,'error');assert.equal(r.control.snapshot().confirmation,'unknown');assert.equal(r.control.isBusy(),true);assert.equal(r.calls.length,calls);
+});
 test('disconnect invalidates delayed lock/start/end/unlock completions without inventing stopped or exposing state',async()=>{
   for(const point of ['lock','start','end','unlock']){
     let release,entered;const atPoint=new Promise(resolve=>entered=resolve),calls=[];
@@ -48,4 +54,9 @@ test('shutdown joins a delayed stop without double end or unlock',async()=>{
   const r=rig({end:async()=>{calls.push('end');entered();await new Promise(resolve=>release=resolve);},unlock:async()=>calls.push('unlock')});
   await r.control.start();const stop=r.control.stop();await atEnd;const close=r.control.shutdown();release();await Promise.all([stop,close]);
   assert.deepEqual(calls,['end','unlock']);assert.equal(r.control.snapshot().status,'idle');
+});
+test('camera exposure time cannot be accepted while lock/start is pending',async()=>{
+  let release,entered;const atLock=new Promise(resolve=>entered=resolve),r=rig({lock:async()=>{entered();await new Promise(resolve=>release=resolve);}});
+  const starting=r.control.start();await atLock;assert.equal(r.control.event(42),false);assert.equal(r.control.snapshot().elapsedSeconds,null);
+  release();await starting;assert.equal(r.control.event(1),true);assert.equal(r.control.snapshot().elapsedSeconds,1);await r.control.stop();
 });

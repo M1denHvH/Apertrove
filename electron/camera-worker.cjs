@@ -13,13 +13,15 @@ const {describeCamera,modelCapabilities,selectCamera} = require('./camera-discov
 const {isUnsupportedCommand,configureDestination}=require('./camera-destinations.cjs');
 const {sdkCandidates,fileVersion}=require('./sdk-environment.cjs');
 const {capabilityReport}=require('./camera-capabilities.cjs');
-const {randomUUID}=require('node:crypto');
+const {randomUUID,createHash}=require('node:crypto');
 const {createOperationHost,operationError}=require('./operation-lifecycle.cjs');
 const {createTransferContexts}=require('./transfer-context.cjs');
 const {createTransferProducer}=require('./transfer-producer.cjs');
 const {createNativeObservations}=require('./native-observations.cjs');
 const {createSdkInitializationGate}=require('./sdk-initialization.cjs');
 const {createBulbControl}=require('./bulb-control.cjs');
+const {profileByFingerprint,createCanonBulbAdapter,bulbExposureSeconds,createFlashPopupControl}=require('./canon-exposure-protocol.cjs');
+const {cameraAccessorySupport}=require('./camera-accessory-support.cjs');
 const {createLiveOrientation,ORIENTATION}=require('./live-orientation.cjs');
 const parent = process.parentPort;
 const generation=process.argv.find(value=>value.startsWith('--apertrove-generation='))?.slice('--apertrove-generation='.length);
@@ -117,8 +119,8 @@ const liveOrientation=createLiveOrientation({
   onState:value=>{state.liveOrientation=value;if(state.capabilities)state.capabilities.liveOrientation=value.available;status();}
 });
 state.liveOrientation=liveOrientation.snapshot();
-const bulb=createBulbControl({onState:value=>{state.bulb=value;status();}});
-state.bulb=bulb.snapshot();
+let bulb=createBulbControl({onState:value=>{state.bulb=value;status();}}),flashControl=createFlashPopupControl(),accessorySupport={bulb:false,flashPopup:false},bulbCaptureOperation=null,accessoryEpoch=null;
+state.bulb=bulb.snapshot();state.flash=flashControl.snapshot();
 state.servo={enabled:false,status:'off',confirmation:'command-accepted',trackingConfirmed:false};
 const log = (level,message) => send({event:'log',data:{level,message,time:new Date().toISOString()}});
 const status = () => {
@@ -194,7 +196,7 @@ function loadCandidate(file) {
     retain:fn('EdsRetain','uint32',['void *']),release:fn('EdsRelease','uint32',['void *']),
     propertySize:fn('EdsGetPropertySize','uint32',['void *','uint32','int32',koffi.out('uint32 *'),koffi.out('uint32 *')]),
     get:fn('EdsGetPropertyData','uint32',['void *','uint32','int32','uint32','void *']),set:fn('EdsSetPropertyData','uint32',['void *','uint32','int32','uint32','void *']),desc:fn('EdsGetPropertyDesc','uint32',['void *','uint32',koffi.out(koffi.pointer(PropDesc))]),
-    command:fn('EdsSendCommand','uint32',['void *','uint32','int32']),capacity:fn('EdsSetCapacity','uint32',['void *',Capacity]),event:fn('EdsGetEvent','uint32',[]),
+    command:fn('EdsSendCommand','uint32',['void *','uint32','int32']),statusCommand:fn('EdsSendStatusCommand','uint32',['void *','uint32','int32']),capacity:fn('EdsSetCapacity','uint32',['void *',Capacity]),event:fn('EdsGetEvent','uint32',[]),
     objectHandler:fn('EdsSetObjectEventHandler','uint32',['void *','uint32',koffi.pointer(ObjectEvent),'void *']),propertyHandler:fn('EdsSetPropertyEventHandler','uint32',['void *','uint32',koffi.pointer(PropertyEvent),'void *']),stateHandler:fn('EdsSetCameraStateEventHandler','uint32',['void *','uint32',koffi.pointer(StateEvent),'void *']),
     dir:fn('EdsGetDirectoryItemInfo','uint32',['void *',koffi.out(koffi.pointer(DirInfo))]),
     stream:fn('EdsCreateMemoryStream','uint32',['uint64',koffi.out('void **')]),download:fn('EdsDownload','uint32',['void *','uint64','void *']),complete:fn('EdsDownloadComplete','uint32',['void *']),cancel:fn('EdsDownloadCancel','uint32',['void *']),
@@ -221,15 +223,9 @@ function loadCandidate(file) {
     return 0;
   },koffi.pointer(ObjectEvent));callbacks.push(objCb);
   const propCb=koffi.register(()=>{if(!propertyRefreshPending){propertyRefreshPending=true;setTimeout(()=>{propertyRefreshPending=false;if(camera)refresh();},100);}return 0;},koffi.pointer(PropertyEvent));callbacks.push(propCb);
-  const stateCb=koffi.register((event)=>{
-    if(event===0x301){const epoch=sessionEpoch;setImmediate(()=>{if(epoch!==sessionEpoch)return;failCapture(Error('Камера отключилась.'));disconnect();log('error','Камера отключена. Проверьте USB и питание.');});}
-    if(event===0x303 && camera && state.working) sdk.command(camera,1,0);
-    return 0;
-  },koffi.pointer(StateEvent));
-  callbacks.push(stateCb);
   function pump(){
     if(shuttingDown||teardownUncertain)return;let delay=20;
-    try{observed('EdsGetEvent','event-pump',()=>sdk.event());liveOrientation.expire();if(camera&&live&&!captureWait&&controls.canStream())delay=frame()?0:3;}catch{/* The bounded observation and parent notification retain this failure. */}
+    try{observed('EdsGetEvent','event-pump',()=>sdk.event());liveOrientation.expire();if(camera&&live&&!captureWait&&!bulb.isBusy()&&controls.canStream())delay=frame()?0:3;}catch{/* The bounded observation and parent notification retain this failure. */}
     timer=setTimeout(pump,delay);
   }
   timer=setTimeout(pump,0);
@@ -259,9 +255,52 @@ function refresh() {
     state.properties[key]={value:current,allowed,choices:choices(key,allowed,current),descriptorCode:code,writable:!code&&allowed.length>0&&(!state.controlsOnly||['iso','shutter','aperture','compensation'].includes(key))&&!(key==='afMode'&&current===3&&!allowed.includes(3))};
   }
   const af=state.properties.afMode;
-  state.capabilities={...state.capabilities,servo:!!state.working&&!restricted&&[0,1,2].includes(af?.value)&&(af.value===1||af.writable&&af.allowed.includes(1)),bulb:false,liveOrientation:state.liveOrientation.available};
+  state.capabilities={...state.capabilities,servo:!!state.working&&!restricted&&[0,1,2].includes(af?.value)&&(af.value===1||af.writable&&af.allowed.includes(1)),bulb:accessoryCapabilities().bulb,flashPopup:accessoryCapabilities().flashPopup,liveOrientation:state.liveOrientation.available};
   if(controls.isServoHeld()&&state.servo.enabled===true&&af?.value!==1)controls.stopServo();
   return status();
+}
+function accessoryCapabilities(){return {bulb:!!accessorySupport.bulb&&!restricted&&!!state.working&&!state.controlsOnly&&sessionEventsRegistered&&state.capabilities?.capture===true&&!!state.saveTo,flashPopup:!!accessorySupport.flashPopup&&!restricted&&!!state.working&&!state.controlsOnly&&sessionEventsRegistered&&flashControl.snapshot().available};}
+function accessoryCall(method,phase,fn){
+  let code;try{code=fn();}catch(error){return observed(method,phase,()=>{throw error;});}
+  // Known returned command rejection keeps its feature retryable. Native binding
+  // exceptions/malformed outcomes retain UNKNOWN ownership and quarantine policy.
+  if(Number.isInteger(code)&&code>=0&&code<=0xffffffff&&(isUnsupportedCommand(code)||[0x50,0x60,0x81,0x8d,0x8d01,0x8d06].includes(code&0xffff)))return code;
+  return observed(method,phase,()=>code);
+}
+async function prepareAccessories(modelId){
+  if(accessoryEpoch===sessionEpoch&&(bulb.isBusy()||flashControl.isBusy()))throw operationError('OPERATION_BUSY','Дождитесь завершения текущей команды камеры.');
+  const epoch=sessionEpoch,reference=camera,file=state.sdkPath;
+  let profile=null;
+  if(file)try{const sha256=createHash('sha256').update(fs.readFileSync(file)).digest('hex'),version=await fileVersion(file);profile=profileByFingerprint({sha256,version,architecture:process.arch});state.sdkFingerprint={sha256,version,architecture:process.arch,qualifiedProfile:profile?.id||null};}catch{state.sdkFingerprint=null;}
+  if(epoch!==sessionEpoch||camera!==reference)throw operationError('OPERATION_STALE_SESSION','Accessory preparation belongs to an old camera session.');
+  accessoryEpoch=epoch;const support=cameraAccessorySupport(modelId),sessionCurrent=()=>{ensureWorking();if(epoch!==sessionEpoch||camera!==reference)throw operationError('OPERATION_STALE_SESSION','Accessory command belongs to an old camera session.');};
+  const sendCommand=(id,parameter)=>{sessionCurrent();return accessoryCall('EdsSendCommand','accessory-command',()=>sdk.command(camera,id,parameter));};
+  const sendStatus=(id,parameter)=>{sessionCurrent();return accessoryCall('EdsSendStatusCommand','accessory-status',()=>sdk.statusCommand(camera,id,parameter));};
+  accessorySupport={bulb:!restricted&&!!profile&&!!support.bulbRoute,flashPopup:!restricted&&!!profile&&support.flashPopup===true};
+  const onBulb=value=>{if(epoch===sessionEpoch&&camera===reference){state.bulb=value;status();}};
+  bulb=createBulbControl(createCanonBulbAdapter({profile,route:support.bulbRoute,cameraQualified:accessorySupport.bulb,io:{sendCommand,sendStatus,onState:onBulb,ensure:()=>{sessionCurrent();if(captureWait||controls.isBusy()||controls.isServoHeld()||flashControl.isBusy()||state.controlsOnly||!sessionEventsRegistered)throw operationError('OPERATION_BUSY','Дождитесь завершения текущей команды камеры.');const mode=get(0x400),tv=get(PROPS.shutter);if(!(mode===4||mode===3&&tv===0x0c))throw Error('Для запуска установите режим BULB на камере.');}}}));
+  flashControl=createFlashPopupControl({profile,cameraQualified:accessorySupport.flashPopup,io:{sendCommand,ensure:()=>{sessionCurrent();if(captureWait||bulb.isBusy()||controls.isBusy()||controls.isServoHeld()||state.controlsOnly||!sessionEventsRegistered)throw operationError('OPERATION_BUSY','Дождитесь завершения текущей команды камеры.');}},onState:value=>{if(epoch===sessionEpoch&&camera===reference){state.flash=value;if(state.capabilities)state.capabilities.flashPopup=accessoryCapabilities().flashPopup;status();}}});
+  state.bulb=bulb.snapshot();state.flash=flashControl.snapshot();
+}
+async function startBulb(args={},operation){
+  ensureWorking();
+  if(!state.saveTo||state.capabilities?.capture!==true)throw Error('Камера не подтвердила сохранение на ПК. Повторите подключение.');
+  if(!accessoryCapabilities().bulb)throw operationError('BULB_PROTOCOL_UNQUALIFIED','BULB недоступен: протокол этой камеры и версии SDK не квалифицирован.');
+  if(bulb.isBusy()||captureWait||controls.isBusy()||controls.isServoHeld())throw operationError('OPERATION_BUSY','Дождитесь завершения текущей команды камеры.');
+  const mode=get(0x400);if(!(mode===4||mode===3&&get(PROPS.shutter)===0x0c))throw Error('Для запуска установите режим BULB на камере.');
+  setDeliveryRoute(args);transfers.noteCapture({operationId:operation.operationId,captureId:args.captureId,sessionEpoch});bulbCaptureOperation=operation.operationId;
+  try{return await bulb.start({autofocus:args.autofocus!==false});}catch(error){if(!bulb.isBusy()){transfers.settleCapture(bulbCaptureOperation,{outcome:'FAILED'});bulbCaptureOperation=null;}throw error;}
+}
+async function stopBulb(){
+  const result=await bulb.stop();
+  if(!bulb.isBusy()&&bulbCaptureOperation){transfers.settleCapture(bulbCaptureOperation,{outcome:'END_COMMAND_ACCEPTED'});bulbCaptureOperation=null;}
+  return result;
+}
+async function closeCamera({lost=false}={}){
+  if(lost){bulb.disconnected();flashControl.disconnected();failCapture(Error('Камера отключилась.'));return disconnect();}
+  // Never close a native session before its owed exposure end and UI unlock.
+  await stopBulb();if(bulb.isBusy())throw operationError('OPERATION_UNKNOWN_TERMINATION','Завершение BULB не подтверждено. Подключение сохранено для повторной остановки.');
+  flashControl.disconnected();return disconnect();
 }
 function listCameras({sdkDir}={}){
   load(sdkDir);let list=null;
@@ -283,6 +322,23 @@ function cameraStorage(){
   // H1 must not call the optional FFI binding with a guessed struct layout.
   return {volumes:[],code:0,unverifiedLayout:'EdsGetVolumeInfo'};
 }
+function readFlashPopupConditions(){
+  // Canon's popup menu checks these values before enabling the mechanical
+  // command. Reading them never changes flash mode or dispatches a popup.
+  const empty={source:'canon-ui-conditions',allowed:null,aEMode:null,movieSwStatus:null,hiIsoNoiseReduction:null};
+  if(!camera||!state.connected)return {...empty,status:'unavailable',reasons:['CAMERA_DISCONNECTED']};
+  if(cameraAccessorySupport(state.modelId).flashPopup!==true)return {...empty,status:'unavailable',reasons:['MODEL_POPUP_UNQUALIFIED']};
+  const read=id=>{try{const value=get(id);return Number.isInteger(value)&&value>=0&&value<=0xffffffff?value:null;}catch{return null;}};
+  const aEMode=read(0x400),movieSwStatus=read(0x01000422),hiIsoNoiseReduction=read(0x0100043d);
+  const values={aEMode,movieSwStatus,hiIsoNoiseReduction};
+  if(Object.values(values).some(value=>value===null))return {...empty,...values,status:'unknown',reasons:['CAMERA_CONDITION_UNAVAILABLE']};
+  const imageMode=[9,10,11,12,13,14,15,19,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,41,42,43,44,45,46,47,48,49,50,51,52,53,54,65,66,67].includes(aEMode);
+  const reasons=[];
+  if(imageMode)reasons.push('SCENE_MODE');
+  if(aEMode===20||movieSwStatus!==0)reasons.push('MOVIE_MODE');
+  if(hiIsoNoiseReduction===4)reasons.push('MULTI_SHOT_NOISE_REDUCTION');
+  return {...empty,...values,status:'ready',allowed:reasons.length===0,reasons};
+}
 async function diagnoseCamera(){
   ensure();
   if(captureWait||controls.isBusy())throw Error('Дождитесь окончания команды камеры.');
@@ -301,15 +357,33 @@ async function diagnoseCamera(){
   if(!camera||epoch!==sessionEpoch)throw Error('Камера отключилась во время диагностики.');
   return {checkedAt:new Date().toISOString(),model:state.model,description:state.description,firmware:state.equipment.firmware,battery:state.battery,
     lens:state.equipment.lensName,mode:state.mode,availableShots:state.equipment.availableShots,sdkVersion,sdkPath:file,working:state.working,
-    saveTo:state.saveTo,storage:storage.volumes,optional:sdk.exports,rows};
+    saveTo:state.saveTo,storage:storage.volumes,optional:sdk.exports,flashConditions:readFlashPopupConditions(),rows};
+}
+function handleCameraState(event,parameter,epoch){
+  if(epoch!==sessionEpoch||!sessionEventsRegistered)return 0;
+  const seconds=bulbExposureSeconds(event,parameter);
+  // The SDK event has no exposure identity. Never accept a queued value during
+  // lock/start; camera time becomes visible only after this start was accepted.
+  if(seconds!==null&&state.working&&state.bulb?.status==='exposing')bulb.event(seconds);
+  if(event===0x301)setImmediate(()=>{if(epoch!==sessionEpoch)return;void closeCamera({lost:true}).catch(error=>log('error',error.message));log('error','Камера отключена. Проверьте USB и питание.');});
+  if(event===0x303&&camera&&state.working)sdk.command(camera,1,0);
+  return 0;
+}
+function registerStateCallback(epoch){
+  // Retain every per-session callback until SDK termination. No late native
+  // callback can dereference a freed closure, or publish into a newer session.
+  if(callbacks.length>=128)throw operationError('OPERATION_ADMISSION_CLOSED','Native callback lifetime budget reached. Restart Apertrove.');
+  const callback=koffi.register((event,parameter)=>handleCameraState(event,parameter,epoch),koffi.pointer(bindings.StateEvent));
+  callbacks.push(callback);return callback;
 }
 function registerWorkingEvents(){
   if(sessionEventsRegistered)return;
+  if(callbacks.length>=128)throw operationError('OPERATION_ADMISSION_CLOSED','Native callback lifetime budget reached. Restart Apertrove.');
   // Mark before the first registration so partial failure still unregisters on close.
   sessionEventsRegistered=true;
   check(sdk.objectHandler(camera,0x200,callbacks[0],null),'События снимков');
   check(sdk.propertyHandler(camera,0x100,callbacks[1],null),'События параметров');
-  check(sdk.stateHandler(camera,0x300,callbacks[2],null),'События камеры');
+  check(sdk.stateHandler(camera,0x300,registerStateCallback(sessionEpoch),null),'События камеры');
   state.eventsRegistered=true;
 }
 function prepareWorkingSession(preferred){
@@ -347,10 +421,11 @@ async function connect({sdkDir,folder,cameraId,readOnly=false,controlsOnly=false
   if(camera&&(!cameraId||cameraId===state.cameraId)){
     if(!readOnly&&state.working&&!!state.controlsOnly!==controlsOnly)throw Error('Отключите камеру перед сменой режима подключения.');
     destination=folder;setDeliveryRoute({route,folder});
+    if(!readOnly&&!controlsOnly&&!state.working)await prepareAccessories(state.modelId);
     if(controlsOnly)return prepareControlSession();
     return !readOnly&&(!state.working||reconfigure||!state.saveTo&&!restricted) ? prepareWorkingSession(savePreference) : refresh();
   }
-  if(camera){if(captureWait||controls.isBusy())throw Error('Дождитесь завершения текущей команды камеры.');await transferProducer.drain();disconnect();if(teardownUncertain)throw operationError('OPERATION_UNKNOWN_TERMINATION','Native session close is unverified.');}
+  if(camera){if(captureWait||controls.isBusy())throw Error('Дождитесь завершения текущей команды камеры.');await transferProducer.drain();await closeCamera();if(teardownUncertain)throw operationError('OPERATION_UNKNOWN_TERMINATION','Native session close is unverified.');}
   load(sdkDir);destination=folder;
   const items=listCameras({sdkDir});state.cameras=items;const selected=selectCamera(items,cameraId);
   if(!selected){state.error='Камера не найдена. Проверьте USB-кабель, питание и режим подключения. Закройте другие программы управления камерой.';return status();}
@@ -369,12 +444,12 @@ async function connect({sdkDir,folder,cameraId,readOnly=false,controlsOnly=false
     // add writes to a read-only connection or probe Canon-unconfirmed bodies.
     if(!readOnly)liveOrientation.prepare({model:selected.model,version:await fileVersion(state.sdkPath)});
     openCameraSession();sessionEpoch++;evidence={};setDeliveryRoute({route,folder});
-    state.description=selected.model;state.model=textProperty(0x2)||selected.model;state.connectedAt=Date.now();state.cameraId=selected.id;state.connected=true;state.error=null;controls.servoConnected();
+    state.description=selected.model;state.modelId=selected.modelId;state.model=textProperty(0x2)||selected.model;state.connectedAt=Date.now();state.cameraId=selected.id;state.connected=true;state.error=null;controls.servoConnected();
     restricted=!modelCapabilities(selected.model,true).capture;
     state.working=false;state.controlsOnly=false;state.evfState=null;state.observedSaveTo=null;state.saveTo=null;state.eventsRegistered=false;
     state.capabilities={capture:false,liveView:false,focus:false,manualFocus:false,import:false,reason:'Открыта сессия диагностики.'};
-    log('success',`${state.model}: USB-подключение установлено.`);if(controlsOnly)return prepareControlSession();return readOnly?refresh():prepareWorkingSession(savePreference);
-  } catch(e) {await transferProducer.drain();disconnect();state.error=e.message;status();throw e;}
+    log('success',`${state.model}: USB-подключение установлено.`);if(!readOnly&&!controlsOnly)await prepareAccessories(selected.modelId);if(controlsOnly)return prepareControlSession();return readOnly?refresh():prepareWorkingSession(savePreference);
+  } catch(e) {await transferProducer.drain();await closeCamera();state.error=e.message;status();throw e;}
   finally {if(list) releaseRef(list,'camera-list-release');}
 }
 function clearCard() {for(const [id,ref] of cardRefs){if(releaseRef(ref,'card-release'))cardRefs.delete(id);}}
@@ -388,7 +463,7 @@ function settleCapture(){
 
 function disconnect() {
   try{controls.stopServo();}catch(error){log('error',error.message);}
-  controls.servoDisconnected();bulb.disconnected();
+  controls.servoDisconnected();bulb.disconnected();flashControl.disconnected();accessorySupport={bulb:false,flashPopup:false};
   if(teardownUncertain){liveOrientation.disconnected();return status();}
   sessionEpoch++;
   failCapture(Error('Съёмка прервана: камера отключена.'));
@@ -573,7 +648,7 @@ async function listCard() {
 }
 const controls=createCameraControl({
   onServo:value=>{state.servo=value;status();},onServoUnknown:error=>{send({event:'nativeObservation',data:{method:'EdsSendCommand',phase:'servo-release',classification:'UNKNOWN'}});log('error',error.message);},
-  ensure:ensureWorking,refresh,get,set,log,previewFocus,pollFocus:readFocus,focusState:()=>focusSample,requiresLiveFocus:()=>!!state.controlsOnly,focusConfirmationAvailable:()=>!state.controlsOnly,onAutofocus:result=>{if(result.status==='focused')evidence.autofocus=true;state.autofocus={...result,at:Date.now()};if(result.status==='focusing')state.lastFocused=null;status();},canFocus:()=>state.controlsOnly?state.capabilities?.focus!==false&&get(0x416)===1&&[0,1,2].includes(get(0x404)):get(0x404)!==3,isCapturing:()=>!!captureWait,isLive:()=>live,
+  ensure:ensureWorking,refresh,get,set,log,previewFocus,pollFocus:readFocus,focusState:()=>focusSample,requiresLiveFocus:()=>!!state.controlsOnly,focusConfirmationAvailable:()=>!state.controlsOnly,onAutofocus:result=>{if(result.status==='focused')evidence.autofocus=true;state.autofocus={...result,at:Date.now()};if(result.status==='focusing')state.lastFocused=null;status();},canFocus:()=>state.controlsOnly?state.capabilities?.focus!==false&&get(0x416)===1&&[0,1,2].includes(get(0x404)):get(0x404)!==3,isCapturing:()=>!!captureWait||bulb.isBusy(),canBulb:()=>accessoryCapabilities().bulb,isLive:()=>live,
   command:(id,param,action)=>{
     ensure();
     if(state.controlsOnly){
@@ -588,19 +663,19 @@ const controls=createCameraControl({
   }
 });
 const handlers={
-  connect,disconnect:async()=>{await transferProducer.drain();const result=disconnect();if(teardownUncertain)throw operationError('OPERATION_UNKNOWN_TERMINATION','Native session close is unverified.');return result;},listCameras,sdkEnvironment,diagnoseCamera,destination:async({folder,route})=>{if(state.controlsOnly)throw operationError('OPERATION_ADMISSION_CLOSED','Передача файлов отключена для этого подключения.');if(captureWait||controls.isBusy())throw Error('Камера занята.');await transferProducer.drain();destination=folder;setDeliveryRoute({route,folder});return true;},status:()=>producersFenced||teardownUncertain?status():refresh(),live:liveView,capture,burstStop:stopBurst,
+  connect,disconnect:async()=>{await transferProducer.drain();const result=await closeCamera();if(teardownUncertain)throw operationError('OPERATION_UNKNOWN_TERMINATION','Native session close is unverified.');return result;},listCameras,sdkEnvironment,diagnoseCamera,destination:async({folder,route})=>{if(state.controlsOnly)throw operationError('OPERATION_ADMISSION_CLOSED','Передача файлов отключена для этого подключения.');if(captureWait||controls.isBusy())throw Error('Камера занята.');await transferProducer.drain();destination=folder;setDeliveryRoute({route,folder});return true;},status:()=>producersFenced||teardownUncertain?status():refresh(),live:liveView,capture,burstStop:stopBurst,
   property:controls.property,focus:async args=>{const result=await controls.focus(args);evidence.driveLens=true;return result;},autofocus:controls.autofocus,
-  servo:args=>controls.servo(args),servoStop:()=>controls.stopServo(),bulbStart:args=>bulb.start(args),bulbStop:()=>bulb.stop(),
+  servo:args=>controls.servo(args),servoStop:()=>controls.stopServo(),bulbStart:startBulb,bulbStop:stopBulb,flashSupport:()=>({...flashControl.snapshot(),available:accessoryCapabilities().flashPopup,canAttempt:accessoryCapabilities().flashPopup}),flashPopup:()=>flashControl.popup(),
   listCard,
   importCard:async({ids,folder,route},operation)=>{ensure();if(state.controlsOnly)throw operationError('OPERATION_ADMISSION_CLOSED','Передача файлов отключена для этого подключения.');const files=[],context=Object.freeze({sessionEpoch,sessionId:route?.sessionId??null,destination:folder,operationId:operation.operationId,captureId:null,operationType:'CARD_IMPORT',attribution:'EXPLICIT_IMPORT',correlation:'CONFIRMED'});for(const id of ids){operation.cancellation.throwIfRequested();const ref=cardRefs.get(id);if(!ref)throw Error('Список файлов устарел.');files.push(download(ref,folder,false,{...context,transferId:randomUUID()}));await new Promise(r=>setImmediate(r));}operation.cancellation.throwIfRequested();return files;},
-  producerFence:async()=>{operations.stopAdmission();await operations.whenIdle({exclusiveOnly:true});controls.stopServo();await bulb.shutdown();await transferProducer.drain();clearTimeout(timer);transferProducer.fence();producersFenced=true;return {drained:true,lastPhotoSequence:photoSequence,nativeStarted,proof:nativeStarted?'unknown':'native-not-started',transfers:transferProducer.snapshot()};},
-  finalizeShutdown:async()=>{if(!producersFenced)throw operationError('OPERATION_ADMISSION_CLOSED','A producer fence is required before teardown.');shuttingDown=true;await transferProducer.drain();disconnect();await new Promise(resolve=>setImmediate(resolve));const released=releaseSdk();if(released&&com)observed('CoUninitialize','com-uninitialize',()=>com(),'void');send({event:'shutdown'});setTimeout(()=>process.exit(teardownUncertain?1:0),20);return {closed:true,lastPhotoSequence:photoSequence,nativeStarted,proof:nativeStarted?'unknown':'native-not-started',observations:observations.snapshot(),transfers:transferProducer.snapshot()};}
+  producerFence:async()=>{operations.stopAdmission();await operations.whenIdle({exclusiveOnly:true});controls.stopServo();await bulb.shutdown();if(bulb.isBusy())throw operationError('OPERATION_UNKNOWN_TERMINATION','Завершение BULB не подтверждено. Проверьте камеру.');await transferProducer.drain();clearTimeout(timer);transferProducer.fence();producersFenced=true;return {drained:true,lastPhotoSequence:photoSequence,nativeStarted,proof:nativeStarted?'unknown':'native-not-started',transfers:transferProducer.snapshot()};},
+  finalizeShutdown:async()=>{if(!producersFenced)throw operationError('OPERATION_ADMISSION_CLOSED','A producer fence is required before teardown.');shuttingDown=true;await transferProducer.drain();await closeCamera();await new Promise(resolve=>setImmediate(resolve));const released=releaseSdk();if(released&&com)observed('CoUninitialize','com-uninitialize',()=>com(),'void');send({event:'shutdown'});setTimeout(()=>process.exit(teardownUncertain?1:0),20);return {closed:true,lastPhotoSequence:photoSequence,nativeStarted,proof:nativeStarted?'unknown':'native-not-started',observations:observations.snapshot(),transfers:transferProducer.snapshot()};}
 };
 // Safety shutter release must bypass held/unknown Servo guards. Blocking burstStop
 // leaves the full press active until holdShutter's 5-second watchdog fires.
-const operationHandlers=Object.fromEntries(Object.entries(handlers).map(([method,handler])=>[method,async(args,context)=>{const owned=!['status','burstStop','servoStop','bulbStop','producerFence'].includes(method);if(owned)currentOperation={method,operationId:context.operationId};try{if(teardownUncertain&&!['status','burstStop','servoStop','bulbStop','producerFence','finalizeShutdown'].includes(method))throw operationError('OPERATION_UNKNOWN_TERMINATION','Native teardown state is unverified.');if(controls.isServoHeld()&&!['status','capture','burstStop','servoStop','bulbStop','servo','property','live','disconnect','producerFence','finalizeShutdown'].includes(method))throw operationError('OPERATION_BUSY','Остановите AI Servo перед другой командой камеры.');if(state.servo.enabled===null&&state.connected&&!['status','burstStop','servoStop','disconnect','producerFence','finalizeShutdown'].includes(method))throw operationError('OPERATION_UNKNOWN_TERMINATION','Остановка AI Servo не подтверждена. Отключите камеру.');return await handler(args,context);}finally{if(currentOperation?.operationId===context.operationId)currentOperation=null;}}]));
+const operationHandlers=Object.fromEntries(Object.entries(handlers).map(([method,handler])=>[method,async(args,context)=>{const owned=!['status','burstStop','servoStop','bulbStop','producerFence'].includes(method);if(owned)currentOperation={method,operationId:context.operationId};try{if(teardownUncertain&&!['status','burstStop','servoStop','bulbStop','producerFence','finalizeShutdown'].includes(method))throw operationError('OPERATION_UNKNOWN_TERMINATION','Native teardown state is unverified.');if(bulb.isBusy()&&!['status','burstStop','bulbStop','disconnect','producerFence','finalizeShutdown'].includes(method))throw operationError('OPERATION_BUSY','BULB-экспозиция ещё не завершена.');if(controls.isServoHeld()&&!['status','capture','burstStop','servoStop','bulbStop','servo','property','live','disconnect','producerFence','finalizeShutdown'].includes(method))throw operationError('OPERATION_BUSY','Остановите AI Servo перед другой командой камеры.');if(state.servo.enabled===null&&state.connected&&!['status','burstStop','servoStop','disconnect','producerFence','finalizeShutdown'].includes(method))throw operationError('OPERATION_UNKNOWN_TERMINATION','Остановка AI Servo не подтверждена. Отключите камеру.');return await handler(args,context);}finally{if(currentOperation?.operationId===context.operationId)currentOperation=null;}}]));
 const operations=createOperationHost({generation,handlers:operationHandlers,send,getSessionEpoch:()=>sessionEpoch});
-async function receive(message) {if(shuttingDown)return;if(message?.type==='emergencyRelease'&&message.generation===generation){try{stopBurst();controls.stopServo();await bulb.stop();}catch{send({event:'transferIssue',data:{code:'EMERGENCY_RELEASE_UNKNOWN'}});}return;}await operations.receive(message);}
+async function receive(message) {if(shuttingDown)return;if(message?.type==='emergencyRelease'&&message.generation===generation){try{stopBurst();controls.stopServo();await stopBulb();}catch{send({event:'transferIssue',data:{code:'EMERGENCY_RELEASE_UNKNOWN'}});}return;}await operations.receive(message);}
 if(parent)parent.on('message',({data})=>receive(data));else process.on('message',receive);
 setInterval(()=>{if(camera&&!producersFenced&&!teardownUncertain)try{refresh();}catch(e){log('error',e.message);}},2500).unref();
 send({event:'ready'});

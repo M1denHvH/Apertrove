@@ -21,7 +21,7 @@ function createCameraControl(io){
     servoControl.stop();
     return exclusive(async()=>{
       if(!Object.hasOwn(PROPS,key)||!Number.isInteger(value)||value<0||value>0xffffffff)throw Error('Некорректный параметр камеры.');
-      if(key==='shutter'&&value===0x0c)throw Error('BULB недоступен: протокол этой камеры и версии SDK не квалифицирован.');
+      if(key==='shutter'&&value===0x0c&&io.canBulb?.()!==true)throw Error('BULB недоступен: протокол этой камеры и версии SDK не квалифицирован.');
       const properties=io.refresh().properties,p=properties[key];
       const target=resolveValue(key,value,p?.allowed||[]);
       const colorTemperature=key==='colorTemperature';

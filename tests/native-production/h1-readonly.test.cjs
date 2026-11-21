@@ -63,7 +63,7 @@ test('read-only connect opens one session without registering native event handl
 test('working event registrations are idempotent and H1 reports them as untested',()=>{
   const source=section(worker,'function registerWorkingEvents(','\nfunction prepareWorkingSession');
   const calls=[];
-  const context=vm.createContext({sessionEventsRegistered:false,camera:'camera',callbacks:['object','property','state'],state:{},
+  const context=vm.createContext({sessionEpoch:1,registerStateCallback:()=> 'state',sessionEventsRegistered:false,camera:'camera',callbacks:['object','property','state'],state:{},
     sdk:Object.fromEntries(['objectHandler','propertyHandler','stateHandler'].map(name=>[name,()=>{calls.push(name);return 0;}])),check:code=>assert.equal(code,0)});
   new vm.Script(source+'\nthis.registerWorkingEvents=registerWorkingEvents;').runInContext(context);
   context.registerWorkingEvents();context.registerWorkingEvents();
@@ -76,7 +76,7 @@ test('working event registrations are idempotent and H1 reports them as untested
 });
 
 test('diagnoseCamera is a read-only report path',()=>{
-  const source=section(worker,'async function diagnoseCamera(','\nfunction prepareWorkingSession');
+  const source=section(worker,'async function diagnoseCamera(','\nfunction handleCameraState');
   assert.match(source,/refresh\(\)/);
   assert.match(source,/cameraStorage\(\)/);
   assert.match(source,/capabilityReport/);

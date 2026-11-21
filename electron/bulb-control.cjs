@@ -1,6 +1,5 @@
-// Dedicated BULB adapter only. Production provides no adapter until the installed
-// runtime's command IDs, UI-lock contract and camera support are qualified.
-// No long shutter press and no historical numeric opcode are substituted.
+// Qualified Canon BULB lifecycle only. The adapter owns the proven per-model
+// start/end route and UI-lock contract; camera events provide exposure time.
 const UNQUALIFIED = 'BULB_PROTOCOL_UNQUALIFIED';
 function createBulbControl(io = {}) {
   let state = { status:'idle', available:io.qualified === true, reason:io.qualified === true ? null : UNQUALIFIED, elapsedSeconds:null, elapsedSource:null, confirmation:'command-accepted', startAcknowledged:false };
@@ -62,12 +61,12 @@ function createBulbControl(io = {}) {
     } finally { changing = false; resolveSettled(); }
   }
   function event(seconds) {
-    if (!['starting','exposing','stopping'].includes(state.status) || !Number.isSafeInteger(seconds) || seconds < 0 || state.elapsedSeconds !== null && seconds < state.elapsedSeconds) return false;
+    if (!state.startAcknowledged || !['exposing','stopping'].includes(state.status) || !Number.isSafeInteger(seconds) || seconds < 0 || state.elapsedSeconds !== null && seconds < state.elapsedSeconds) return false;
     publish({ elapsedSeconds:seconds, elapsedSource:'camera-event' });
     return true;
   }
   function disconnected() {
-    const unknown = changing || endOwed || lockOwed;
+    const unknown = changing || endOwed || lockOwed || state.status === 'error' && state.confirmation === 'unknown';
     connectionLost=true;
     endOwed = false; lockOwed = false;
     return publish({ status:unknown ? 'error' : 'idle', confirmation:unknown ? 'unknown' : 'command-accepted', error:unknown ? 'Соединение потеряно: завершение BULB не подтверждено.' : undefined });
