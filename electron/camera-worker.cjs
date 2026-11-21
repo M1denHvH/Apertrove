@@ -391,7 +391,7 @@ function liveView({enabled}) {
   ensureWorking();
   if(enabled&&state.capabilities?.liveView===false)throw Error('Live View недоступен в текущем режиме камеры.');
   if(captureWait||controls.isBusy())throw Error('Дождитесь завершения текущей команды камеры.');
-  if(!!enabled===live)return status();
+  if(!!enabled===live)return state.controlsOnly&&!enabled&&!evfRestore?refresh():status();
   if(enabled){
     const output=get(0x500),mode=get(0x501);
     if(output===null||mode===null)throw Error('Камера не предоставила исходные настройки Live View.');

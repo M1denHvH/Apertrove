@@ -99,6 +99,11 @@ test('control-only Live View stop reads actual AF state after restore and keeps 
     const finalRead=actions.findLastIndex(item=>item.kind==='read'&&item.id===PROPS.afMode);
     assert.ok(finalRead>release&&release>lastRestore,'AF must be read after EVF restoration and ref release');
     assert.equal(context.propertiesRestored(initial,{camera:stopped}),finalAF===2,'A persistent AF difference must still fail the unchanged baseline guard');
+    const writesBefore=actions.filter(item=>item.kind==='write').length,releasesBefore=actions.filter(item=>item.kind==='release').length,readsBefore=actions.filter(item=>item.kind==='read'&&item.id===PROPS.afMode).length;
+    const settled=context.liveView({enabled:false});
+    assert.equal(settled.properties.afMode.value,finalAF);assert.equal(actions.filter(item=>item.kind==='read'&&item.id===PROPS.afMode).length,readsBefore+1);
+    assert.equal(actions.filter(item=>item.kind==='write').length,writesBefore,'Idempotent stop verification must not repeat an EVF write');
+    assert.equal(actions.filter(item=>item.kind==='release').length,releasesBefore,'Idempotent stop verification must not repeat a ref release');
     assert.equal(actions.some(item=>item.kind==='write'&&item.id===PROPS.afMode),false);
   }
 });
