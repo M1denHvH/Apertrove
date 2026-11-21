@@ -1,122 +1,132 @@
-<p align="center">
-  <img src="assets/icon.png" width="88" height="88" alt="Apertrove">
-</p>
+<p align="center"><img src="assets/icon.png" width="80" height="80" alt=""></p>
 <h1 align="center">Apertrove</h1>
-<p align="center"><strong>A place for your camera, your shoot, and the next frame.</strong></p>
-<p align="center">Canon EOS camera controls, Live View and a photo workspace for Windows.</p>
+<p align="center"><strong>Compose on the big screen. Keep the whole shoot together.</strong></p>
+<p align="center">An independent camera and photo workspace for Canon EOS on Windows.</p>
 
 <p align="center">
-  <a href="https://github.com/M1denHvH/Apertrove/actions/workflows/ci.yml"><img src="https://github.com/M1denHvH/Apertrove/actions/workflows/ci.yml/badge.svg?branch=main" alt="Main branch Windows checks"></a>
-  <a href="package.json"><img src="https://img.shields.io/badge/source-0.10.3-blue" alt="Source version 0.10.3"></a>
-  <a href="LICENSE"><img src="https://img.shields.io/github/license/M1denHvH/Apertrove" alt="MIT license"></a>
-  <a href="https://github.com/M1denHvH/Apertrove/releases/latest"><img src="https://img.shields.io/github/v/release/M1denHvH/Apertrove" alt="Latest published release"></a>
+  <a href="https://github.com/M1denHvH/Apertrove/actions/workflows/ci.yml"><img src="https://github.com/M1denHvH/Apertrove/actions/workflows/ci.yml/badge.svg?branch=main" alt="Windows checks on main"></a>
+  <a href="https://github.com/M1denHvH/Apertrove/releases/tag/Release"><img src="https://img.shields.io/badge/published-0.10.3-526b4a" alt="Published release 0.10.3"></a>
+  <a href="package.json"><img src="https://img.shields.io/badge/source-0.10.3%20development-677b91" alt="Development source 0.10.3"></a>
+  <a href="docs/REQUIREMENTS.md"><img src="https://img.shields.io/badge/platform-Windows%20x64-677b91" alt="Windows x64"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-526b4a" alt="MIT license"></a>
 </p>
 
-<p align="center">
-  <a href="https://github.com/M1denHvH/Apertrove/releases">Download</a> ·
-  <a href="docs/INSTALLATION.md">Get started</a> ·
-  <a href="docs/USER_GUIDE.md">User guide</a> ·
-  <a href="docs/COMPATIBILITY.md">Camera compatibility</a> ·
-  <a href="README.ru.md">Русский</a>
-</p>
+<p align="center"><a href="https://github.com/M1denHvH/Apertrove/releases/tag/Release">Download</a> · <a href="docs/INSTALLATION.md">Start here</a> · <a href="docs/USER_GUIDE.md">User guide</a> · <a href="docs/COMPATIBILITY.md">Camera support</a> · <a href="README.ru.md">Русский</a></p>
 
-![Apertrove Capture workspace with a simulated camera preview](docs/screenshots/workspace.png)
+![Apertrove Capture workspace with a clearly labelled demo camera](docs/screenshots/workspace.png)
 
-Apertrove brings camera settings, framing, photo review and session folders into one desktop application. Connect a compatible Canon camera by USB to compose on a larger screen, or work with existing photos without connecting a camera.
+Apertrove gives a shoot a home: camera settings beside the preview, a folder for the session, and a library for reviewing what arrives. It is useful at a product table, in a small studio, or whenever you want to frame and review photographs on a larger screen.
 
-It is an independent open-source project. It uses your separately installed Canon runtime and includes no Canon SDK binaries.
+Connect a compatible Canon EOS camera by USB, or start with photographs already on your computer. Sessions, the local Library and Lighting Studio work without a camera.
 
-## Made for a shoot
+**About this version:** the published Windows release is **0.10.3, dated 14 November 2026**. This source branch includes later changes while retaining that version number. The screenshots and guides describe the current source; they do not mean those changes are already in the published download.
 
-| Work with your camera | Keep the shoot together |
+[Explore](#a-workspace-for-the-shoot) · [Screenshots](#see-it-in-use) · [Install](#your-first-session) · [Compatibility](#bring-your-canon-eos) · [Help test](#help-us-test-more-cameras) · [Develop](#build-and-contribute)
+
+## A workspace for the shoot
+
+**Frame before you shoot.** Live View brings the preview to your monitor with zoom, composition guides and a small RGB histogram toggle. Rotate the preview by hand, or use current orientation data when the camera and runtime supply it.
+
+**Keep focus close at hand.** One AF control contains One Shot AF and an AI Servo switch. Exposure, white balance, image quality and electronic lens steps follow the controls your camera actually offers. A running Servo command can stay active while you use the shutter.
+
+**Give every shoot its own place.** Create a named session with a folder, client and notes. Resume it later, review its photographs together, and reuse camera presets. Preset sequences and interval tools are available for supported setups.
+
+**Review without rewriting your originals.** Search and rate photographs in the Library, inspect metadata, save nondestructive adjustments and export separate JPEGs. Shot Inspector provides a second window for reviewing received camera frames. RAW viewing uses an embedded preview where available; edited RAW-to-JPEG export is not supported.
+
+**Work away from the keyboard.** Web Remote opens a limited set of controls in a phone browser on your trusted local network. The camera remains connected to the PC by USB. Lighting Studio helps you explore color palettes and plan a lighting setup.
+
+## See it in use
+
+These are direct screenshots of the running Electron application, using a separate **demo profile, fake camera provider and sample artwork**. They show real application UI; they are not a physical-camera test. No interface images were generated with AI.
+
+| Live View histogram | Portrait preview |
 | --- | --- |
-| Live View with composition guides, zoom and a compact RGB histogram toggle | Named sessions with their own folders, notes and presets |
-| Camera-reported exposure, white balance, image quality and focus controls | Local import, ratings, filters and metadata inspection |
-| One-shot AF, sustained AI Servo commands and electronic lens steps where supported | Nondestructive adjustments and separate JPEG/metadata exports |
-| Camera presets, ordered preset series and interval tools | A separate Shot Inspector window for registered camera arrivals |
-| A phone browser remote on a trusted LAN | Lighting Studio palettes and diagrams |
+| ![The existing RGB histogram opened from its compact icon](docs/screenshots/live-histogram.png) | ![Demo Live View rotated to portrait with its proportions preserved](docs/screenshots/live-portrait.png) |
 
-Availability follows the camera, lens, shooting mode and installed runtime. AI Servo command acceptance does not confirm optical focus. Dedicated BULB and mechanical flash pop-up remain unavailable until their protocols are qualified. Capture and camera-file transfers still need broader physical validation. [Read compatibility notes](docs/COMPATIBILITY.md).
+<details>
+<summary><strong>Focus — One Shot and AI Servo in one control</strong></summary>
 
-## A closer look
-
-All images below are direct screenshots of the running application. They use an isolated demo profile, sample artwork and a fake provider; they are **simulated previews**, not evidence of a connected physical camera.
-
-<details open>
-<summary><strong>Sessions — one folder and context for each shoot</strong></summary>
-
-![Session folders and notes](docs/screenshots/sessions.png)
+![The integrated AF control with AI Servo active and the shutter available](docs/screenshots/autofocus.png)
 
 </details>
 
 <details>
-<summary><strong>Library — review, rate and organize your frames</strong></summary>
+<summary><strong>Sessions — pick up where you left off</strong></summary>
 
-![Photo library with demonstration images](docs/screenshots/library.png)
-
-</details>
-
-<details>
-<summary><strong>Shot Inspector — a dedicated review window</strong></summary>
-
-![Shot Inspector showing a demonstration frame](docs/screenshots/inspector.png)
+![Named demo sessions with folders and photo counts](docs/screenshots/sessions.png)
 
 </details>
 
 <details>
-<summary><strong>Lighting Studio — choose colors and plan a setup</strong></summary>
+<summary><strong>Library — review and select</strong></summary>
 
-![Lighting Studio palette](docs/screenshots/lighting.png)
+![Demo photos in the local Library](docs/screenshots/library.png)
 
 </details>
 
 <details>
-<summary><strong>Your workspace — language, theme and appearance</strong></summary>
+<summary><strong>Shot Inspector — a separate place to review a frame</strong></summary>
 
-![Apertrove appearance and settings](docs/screenshots/settings.png)
+![Shot Inspector displaying sample artwork](docs/screenshots/inspector.png)
 
 </details>
 
-## Get started
+<details>
+<summary><strong>Settings and Lighting Studio</strong></summary>
 
-1. Download the Windows x64 ZIP and checksum file from [Releases](https://github.com/M1denHvH/Apertrove/releases). Verify the SHA-256 and extract the entire archive.
-2. Open **Apertrove.exe** and keep the rest of the application folder alongside it. The portable build is unsigned.
-3. For camera work, install compatible official **Canon EDSDK x64** components separately. Use the setup guide to find the runtime and check your camera.
-4. Create a session, choose its folder, and open **Capture → Start Live View**. Or skip camera setup and import existing photos into the Library.
+![Language, theme and workspace appearance settings](docs/screenshots/settings.png)
 
-The published release is a snapshot. This branch contains further development changes, and the source version remains **0.10.3** until a release is prepared.
+![Lighting Studio color palette and lighting tools](docs/screenshots/lighting.png)
 
-[Full installation guide](docs/INSTALLATION.md) · [System requirements](docs/REQUIREMENTS.md) · [Troubleshooting](docs/TROUBLESHOOTING.md)
+</details>
 
-## Requirements
+## Your first session
 
-- Windows x64; Node.js 24 and npm if building from source.
-- A USB data cable and compatible Canon runtime for camera controls.
-- A compatible camera, lens and shooting mode. Controls are enabled from reported capabilities rather than a universal model promise.
-- A trusted local network for Web Remote. The camera stays connected to the computer by USB.
+1. Get the Windows x64 ZIP and `SHA256SUMS.txt` from [Releases](https://github.com/M1denHvH/Apertrove/releases/tag/Release). Check the ZIP's SHA-256, then extract the whole archive.
+2. Open **Apertrove.exe** inside the extracted folder. Keep its other files alongside it. The portable build is unsigned.
+3. Choose a language and appearance. You can skip camera setup and import existing photographs straight away.
+4. For camera work, install compatible official Canon x64 EDSDK components separately, close other camera applications, and follow Apertrove's setup guide.
+5. Create a session, choose its folder and open **Capture**. Start Live View when your camera offers it.
 
-Library, photo organization and Lighting Studio work without Canon software. Keep independent originals when testing camera-transfer workflows.
+[Installation and first connection](docs/INSTALLATION.md) · [Requirements](docs/REQUIREMENTS.md) · [Troubleshooting](docs/TROUBLESHOOTING.md)
 
-## Develop
+## Bring your Canon EOS
+
+Apertrove is intended for compatible Canon EOS cameras supported by the installed EDSDK runtime. Features depend on the body, firmware, lens, camera mode and runtime together. A greyed control means the current connection does not offer that action.
+
+Windows x64 is the current target. Canon DLLs and proprietary headers are **not included**; obtain the appropriate components from Canon. Web Remote is a connection to Apertrove on your computer, not direct camera Wi-Fi support.
+
+The project is still gathering camera testing reports. Earlier hardware checks cover a limited set of camera reads, exposure controls and Live View. Newer Servo, orientation and capture workflows also have automated fake-provider coverage, which cannot prove optical focus, physical shutter behavior or compatibility with every camera.
+
+Mechanical flash pop-up and dedicated BULB control are **not currently available**. They are not listed as completed features. See [camera support and limits](docs/COMPATIBILITY.md) before planning a shoot around a particular control.
+
+## Help us test more cameras
+
+Have a compatible EOS camera? We would welcome your experience. You do not need to be a developer: tell us what you tried, what you expected and what happened. Reports from different cameras help identify gaps that one setup cannot reveal.
+
+[Open a camera or app bug report](https://github.com/M1denHvH/Apertrove/issues/new?template=bug_report.yml). For a camera issue, include the model, firmware, lens, camera mode, Apertrove version and Canon runtime version if you can find it. Screenshots and short logs can help; remove private paths, serial numbers, personal images and remote access links first. **Do not upload Canon SDK files.**
+
+Ideas are welcome through [feature requests](https://github.com/M1denHvH/Apertrove/issues/new?template=feature_request.yml). Security issues have a [separate reporting guide](SECURITY.md).
+
+## Build and contribute
+
+Use Windows x64, Git, **Node.js 24** and npm. The UI, local library and synthetic tests can be developed without Canon software.
 
 ```powershell
 git clone https://github.com/M1denHvH/Apertrove.git
 cd Apertrove
 npm ci
+npm test
 npm run build
 npm start
 ```
 
-React and Vite render the workspace; Electron owns desktop services; the camera worker talks to EDSDK through Koffi. Fake-provider tests exercise controls without a camera.
+For renderer development, use `npm run dev` with the separate Electron launch described in [Development](docs/DEVELOPMENT.md). `npm run package` creates a local portable folder; it publishes nothing.
 
-[Development and checks](docs/DEVELOPMENT.md) · [Architecture](docs/ARCHITECTURE.md) · [Contributing](CONTRIBUTING.md) · [Localization](docs/localization.md)
+[Contributing](CONTRIBUTING.md) · [Development and tests](docs/DEVELOPMENT.md) · [Architecture](docs/ARCHITECTURE.md) · [Translation](docs/localization.md)
 
-## Help and contributions
+## License
 
-Found a problem? Open a [bug report](https://github.com/M1denHvH/Apertrove/issues/new?template=bug_report.yml) with your app version and reproduction steps. Include the camera/runtime combination only when relevant. Remove access keys, private paths, serial numbers and personal images.
+Apertrove's source is [MIT licensed](LICENSE). Canon software and other dependencies have their own terms; see [third-party notices](THIRD_PARTY_NOTICES.md). This is an independent project, not affiliated with or endorsed by Canon.
 
-For an idea, use a [feature request](https://github.com/M1denHvH/Apertrove/issues/new?template=feature_request.yml). Camera support reports are welcome; a successful command is different from confirmed physical behavior.
-
-Apertrove source is [MIT licensed](LICENSE). Canon components and third-party dependencies have their own terms. Apertrove is not affiliated with or endorsed by Canon.
-
-[Third-party notices](THIRD_PARTY_NOTICES.md) · [Privacy](docs/PRIVACY.md) · [Security reporting](SECURITY.md)
+[Documentation](docs/README.md) · [Privacy](docs/PRIVACY.md)

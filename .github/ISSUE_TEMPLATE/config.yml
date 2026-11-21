@@ -1,8 +1,8 @@
 blank_issues_enabled: false
 contact_links:
-  - name: User guide and troubleshooting
+  - name: Installation, user guides and troubleshooting
     url: https://github.com/M1denHvH/Apertrove/blob/main/docs/USER_GUIDE.md
-    about: Check setup and supported workflows before reporting a problem.
+    about: Find setup instructions, camera limits and help with common problems.
   - name: Report a vulnerability
     url: https://github.com/M1denHvH/Apertrove/blob/main/SECURITY.md
     about: Keep sensitive details out of public issues.

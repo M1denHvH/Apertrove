@@ -1,16 +1,16 @@
 # Requirements
 
-| Component | What you need |
+| Part | Requirement |
 | --- | --- |
-| System | Windows x64. Windows 10 x64 has been used for development and portable-build checks; a clean Windows 11 installation still needs separate verification. |
-| Camera | A compatible Canon camera, USB data cable, and official x64 EDSDK runtime installed separately. |
-| Lens | A compatible electronic AF lens for autofocus and electronic focus steps. Other features depend on the lens and camera. |
-| Disk space | Room for the application, profile, preview cache and session originals. |
-| Web Remote | A browser and a trusted LAN that lets the phone reach the computer. |
-| Source build | Git, Node.js 24 and npm on Windows x64. |
+| Computer | Windows x64. Windows 10 x64 is the development and portable-build check environment; a clean Windows 11 setup still needs separate testing. |
+| Camera controls | A compatible Canon EOS camera, USB data cable, and separately installed official x64 EDSDK runtime. |
+| Autofocus | A compatible electronic lens in AF mode and a supported camera focus route. |
+| Storage | Space for the portable folder, local profile, preview cache and session photographs. |
+| Web Remote | A phone/browser on a trusted LAN that can reach the PC's private interface. |
+| Building from source | Windows x64, Git, Node.js 24 and npm. |
 
-No camera or Canon runtime is needed for the local library, Lighting Studio, build or synthetic tests. There are no x86 or ARM64 Windows packages.
+No camera or Canon runtime is needed to use the local Library, sessions or Lighting Studio, build the interface, or run the synthetic tests. Windows x86 and ARM64 packages are not supplied.
 
-Camera availability is detected from the runtime, current camera properties and descriptors. See [Compatibility](COMPATIBILITY.md) for feature limits, and [Installation](INSTALLATION.md) for setup.
+Keep the whole portable folder together. Install Canon components separately under Canon's terms. [Installation](INSTALLATION.md) explains setup; [Camera support](COMPATIBILITY.md) covers feature-specific limits.
 
-Keep the entire portable application folder together. Canon components are installed separately and retain Canon's terms. [Third-party notices](../THIRD_PARTY_NOTICES.md).
+[Documentation](README.md) · [Third-party notices](../THIRD_PARTY_NOTICES.md)

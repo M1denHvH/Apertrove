@@ -1,25 +1,37 @@
-name: Bug report
-description: Report a reproducible camera or application problem
+name: Bug report or camera test result
+description: Tell us what happened in Apertrove or share a camera compatibility result
 body:
+  - type: markdown
+    attributes:
+      value: Thanks for helping test Apertrove. Describe what you tried in your own words; unknown camera or runtime details are fine. Do not upload Canon SDK files, private photographs, serial numbers or remote access links.
   - type: input
     id: version
     attributes:
       label: Apertrove version and Windows version
+      placeholder: For example, Apertrove 0.10.3, Windows 10 x64
     validations:
       required: true
   - type: textarea
     id: hardware
     attributes:
-      label: Camera, lens, SDK version and connection
-      description: Include lens AF/MF switch, camera dial mode and whether EOS Utility is closed. Do not include serial numbers.
+      label: Camera setup, if relevant
+      description: Camera model and firmware, lens and AF/MF switch, camera dial/drive mode, runtime version if known, and whether other camera apps were closed. Leave out serial numbers.
   - type: textarea
     id: steps
     attributes:
-      label: Steps, expected result and actual result
+      label: What did you try?
+      description: List the steps. For shutter or focus problems, mention clicking versus holding, mouse/keyboard, Live View and any recent AI Servo change.
+    validations:
+      required: true
+  - type: textarea
+    id: outcome
+    attributes:
+      label: Expected result and actual result
+      description: Successful compatibility reports are welcome too. Say which actions you checked.
     validations:
       required: true
   - type: textarea
     id: logs
     attributes:
-      label: Sanitized logs or screenshot
-      description: Remove private paths, photos, Wi-Fi details, QR codes and remote access keys.
+      label: Optional screenshot or short log
+      description: Remove private paths, personal images, serial numbers, network details, QR codes and remote access keys. Keep the original log privately. Do not attach proprietary binaries, headers or dumps.

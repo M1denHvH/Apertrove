@@ -1,26 +1,51 @@
 # Troubleshooting
 
-For camera problems, start with **Settings → Setup and diagnostics → Camera diagnostics**. For files, inspect the session folder, Library and **Tools → Activity log**.
+[Installation](INSTALLATION.md) · [Camera support](COMPATIBILITY.md) · [User guide](USER_GUIDE.md)
 
-| Problem | What to try |
+For a camera problem, begin with **Settings → Setup and diagnostics → Camera diagnostics**. For a missing photograph, check the camera/card, session folder, Library and **Tools → Activity log** before trying another capture.
+
+## Connect and set up
+
+| Symptom | What to check |
 | --- | --- |
-| Canon runtime not found | Install official compatible x64 Canon components. Choose the folder containing `EDSDK.dll` and check again. |
-| Runtime found but cannot load | Open **What Apertrove checked**. Verify x64 architecture and keep official dependencies together. Note the runtime version and error text. |
-| Camera missing or busy | Turn it on, use a USB data cable and direct port, and close EOS Utility or other camera software. Check the camera's USB/Wi-Fi connection settings. |
-| Exposure setting disabled | Check the camera mode and wait for an active operation to finish. Diagnostics can distinguish current unavailability from unsupported controls. |
-| AI Servo reports unverified focus | The command state is separate from optical focus. Check the preview. Turn Servo off to release the held action. An unknown release requires checking the camera. |
-| Histogram blank or unavailable | Start Live View and wait for a decoded frame. The software histogram samples that preview, not a saved RAW file. |
-| A received photo is outside the expected session | Open it in Library. If an association warning appears, choose **Photo session**. Ambiguous delayed transfers retain their file and provenance. Reassignment does not move originals. |
-| Photo missing after a camera transfer | Keep any card copy. Check the session output, Library and activity log. Do not rely on an experimental host-only transfer as your only copy. |
-| Flash pop-up unavailable | A flash mode setting cannot raise the mechanism. No mechanical operation is dispatched unless a qualified route is available. Use the camera's own controls where appropriate. |
-| BULB unavailable | Dedicated BULB control has not been qualified for this runtime. Apertrove does not substitute a long ordinary shutter press. |
-| Import cannot start | Open a session first. Verify its folder is writable and has space. Some RAW files have no readable embedded preview. |
-| Library cannot open | Read the error, check drive access, close the app and back up the profile. Retry does not reset the library. Preserve existing records and originals before recovery. |
-| Settings seem missing | Use the same Windows account. Check both `%APPDATA%/Apertrove` and a legacy `%APPDATA%/Focal Studio` profile before restoring a backup. |
-| Phone cannot reach Web Remote | Select a reachable private interface, use the current QR link and check private-network firewall access. Guest Wi-Fi can isolate devices. |
+| Canon runtime not found | Install official compatible x64 Canon components. Choose the folder containing EDSDK.dll and check again. |
+| Runtime found but cannot load | Open **What Apertrove checked**. Check x64 architecture and keep the official installation/dependencies together. Note the version and error text. |
+| Camera missing or busy | Use a USB data cable and direct port, turn it on, close EOS Utility/other camera apps, and check USB or Wi-Fi connection settings on the camera. |
+| Exposure control disabled | Check the mode dial and lens. Wait for an operation to finish; use diagnostics to inspect currently offered values. |
+| A different camera app stops working | Disconnect the working session in Apertrove before opening another camera application. |
 
-**Unknown** means the application could not confirm the outcome. Keep received files, inspect the camera and avoid assuming that a physical operation ended.
+## Preview, focus and shutter
 
-When reporting a problem, include the app and Windows versions, steps, expected and actual behavior, and the camera/runtime combination when relevant. Remove personal paths, serial numbers, access keys, QR links and private photos. Do not post proprietary SDK files.
+| Symptom | What it means or what to try |
+| --- | --- |
+| Histogram empty | Start Live View and wait for a decoded frame. The chart icon opens/closes the graph; it describes that JPEG preview. An already open unavailable graph can still be closed. |
+| Portrait orientation is not automatic | The current camera/runtime may not provide live orientation data. Use the clockwise rotation icon; its tooltip identifies manual versus camera orientation. |
+| Camera data is available but the preview uses your angle | Manual rotation overrides automatic behavior. Use the nearby return-to-camera-orientation control. |
+| AF accepted but sharpness is unverified | A command result is not proof of optical focus. Inspect the preview and saved photograph. Check lens AF/MF and camera mode. |
+| Looking for the Servo switch | Open the arrow inside the AF control. When Servo is active, the main AI Servo button stops it. |
+| A short click behaves like a long series | Release the input or leave the app window, then inspect the camera. The maximum hold limit is a fallback. Report the drive mode, Servo state, input method and exact sequence. Do not treat this as normal behavior. |
+| Servo/shutter release is unknown | The app could not confirm the outcome. Check the camera before repeating a physical operation; follow the displayed recovery instruction. |
+| Flash pop-up or BULB disabled | These controls are currently unavailable. Flash settings do not prove mechanical pop-up, and a long ordinary shutter press is not presented as dedicated BULB support. |
 
-[Installation](INSTALLATION.md) · [Compatibility](COMPATIBILITY.md) · [Report a bug](https://github.com/M1denHvH/Apertrove/issues/new?template=bug_report.yml) · [Security reporting](../SECURITY.md)
+## Files and review
+
+| Symptom | What to check |
+| --- | --- |
+| Camera photo missing | Preserve any card copy. Check the session output, Library and activity log. Live View/AF preview alone is not a saved photo. |
+| Camera photo in an unexpected session | Open it in Library. If an association warning appears, choose **Photo session**. Delayed events can be ambiguous; reassignment does not move originals. |
+| Import cannot start | Open a session and check its folder's permissions and free space. |
+| RAW cannot display or looks smaller than expected | Some RAW files lack a readable embedded JPEG. The displayed detail/histogram belongs to the embedded preview. Edited RAW-to-JPEG export is unavailable. |
+| Library cannot open | Read the error, check drive access, close the app and back up the profile. **Retry** does not reset the Library. Preserve records and originals before recovery. |
+| Settings appear missing | Use the same Windows account. Check the current `%APPDATA%\Apertrove` profile and a legacy `%APPDATA%\Focal Studio` profile before restoring a backup. |
+
+## Phone remote
+
+Select a reachable private interface and use the current QR link. The phone and PC must share a trusted LAN; guest Wi-Fi may isolate devices. Check private-network firewall access. The link contains an access key, so never post it publicly. Restarting the server changes the key.
+
+## Send a useful report
+
+You do not need to diagnose the SDK yourself. Tell us the steps, expected result and actual result, with Apertrove and Windows versions. For camera problems, add the model, firmware, lens, shooting mode and runtime version if known. Describe whether you clicked, held, used a keyboard, or switched Servo immediately before the problem.
+
+Remove private paths, personal images, serial numbers, network details, QR codes and remote keys from screenshots/logs. Do not attach Canon DLLs, headers or proprietary dumps. Keep a copy of the original log privately if it is needed later.
+
+[Report a problem](https://github.com/M1denHvH/Apertrove/issues/new?template=bug_report.yml) · [Report a security issue](../SECURITY.md)
