@@ -19,7 +19,7 @@ jobs:
       - run: npm ci
       - run: npm test
       - name: Verify native admission guards without SDK loading
-        run: node --no-addons --max-old-space-size=192 --test tests/native-hardware/h1a.test.cjs tests/native-hardware/h1-guard.test.cjs
+        run: node --no-addons --max-old-space-size=192 --test tests/native-hardware/h1a.test.cjs tests/native-hardware/h1-guard.test.cjs tests/native-hardware/h2-guard.test.cjs tests/native-production/h2-controls.test.cjs
       - name: Run isolated T1 regression suite
         run: npm run test:t1
       - run: npm run i18n:check
