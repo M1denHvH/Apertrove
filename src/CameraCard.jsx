@@ -103,13 +103,13 @@ export default function CameraCard({camera,disabled=false,onConnect,onNotice,api
     owner.operationId=data.operationId;setProgress(data);
   }),[api]);
 
-  const transfer=async(mode,ids=selected)=>{
+  const transfer=async(mode,ids=selected,retryOperationId)=>{
     if(!ids.length||exportOwner.current||request.current)return;
     const owner={operationId:null,mode};exportOwner.current=owner;thumbnailQueue.current=[];setExporting(true);setProgress({done:0,total:ids.length,status:'starting'});setReceipt(null);setError('');
     try{
       await thumbnailSettled.current;
       if(!alive.current||!current.current.camera.connected)return;
-      const result=await api.cardExport({ids,mode});
+      const result=await api.cardExport({ids,mode,...(retryOperationId?{retryOperationId}:{})});
       if(!alive.current)return;
       setReceipt({...result,mode});
       if(result.status==='completed'){
@@ -175,7 +175,7 @@ export default function CameraCard({camera,disabled=false,onConnect,onNotice,api
             {!loading&&listing?.status==='ready'&&!listing.items.length&&<div className="camera-card-empty"><FolderOpen size={36} strokeWidth={1.25}/><h2>{t('cameraCard.empty_folder')}</h2></div>}
             {listing?.nextOffset!==null&&listing?.nextOffset!==undefined&&<button type="button" className="btn camera-card-load-more" disabled={isLocked} onClick={()=>load(listing.parentId,{append:true})}>{t('cameraCard.load_more')}</button>}
           </>}
-        {incomplete&&!exporting&&<div className="camera-card-incomplete" role="status"><span>{t(receipt.status==='cancelled'?'cameraCard.cancelled_summary':'cameraCard.partial_summary',{done:number(receipt.files?.length||0),remaining:number(receipt.remainingIds?.length||0)})}{receipt.failures?.[0]?.error&&<small>{cleanError(receipt.failures[0].error)}</small>}</span>{receipt.remainingIds?.length>0&&<button type="button" className="btn quiet" disabled={isLocked} onClick={()=>transfer(receipt.mode,receipt.remainingIds)}>{t('cameraCard.retry_remaining')}</button>}<button type="button" className="icon-btn" aria-label={t('cameraCard.dismiss')} onClick={()=>setReceipt(null)}><X size={15}/></button></div>}
+        {incomplete&&!exporting&&<div className="camera-card-incomplete" role="status"><span>{t(receipt.status==='cancelled'?'cameraCard.cancelled_summary':'cameraCard.partial_summary',{done:number(receipt.files?.length||0),remaining:number(receipt.remainingIds?.length||0)})}{receipt.failures?.[0]?.error&&<small>{cleanError(receipt.failures[0].error)}</small>}</span>{receipt.remainingIds?.length>0&&<button type="button" className="btn quiet" disabled={isLocked} onClick={()=>transfer(receipt.mode,receipt.remainingIds,receipt.operationId)}>{t('cameraCard.retry_remaining')}</button>}<button type="button" className="icon-btn" aria-label={t('cameraCard.dismiss')} onClick={()=>setReceipt(null)}><X size={15}/></button></div>}
       </>}
     {preview&&<Modal title={preview.name} wide onClose={()=>setPreview(null)}><div className="camera-card-preview">{images[preview.id]?<img src={images[preview.id]} alt={preview.name}/>:<div><ImageOff size={38} strokeWidth={1.25}/><p>{t('cameraCard.preview_unavailable')}</p></div>}<dl><div><dt>{t('cameraCard.type')}</dt><dd>{format(preview)}</dd></div><div><dt>{t('cameraCard.size')}</dt><dd>{fileSize(preview.size)}</dd></div><div><dt>{t('cameraCard.date')}</dt><dd>{fileDate(preview.date)}</dd></div></dl><div className="camera-card-preview-actions"><button type="button" className="btn" disabled={isLocked} onClick={()=>{setPreview(null);void transfer('import',[preview.id]);}}><Upload size={15}/>{t('cameraCard.import_library')}</button><button type="button" className="btn dark" disabled={isLocked} onClick={()=>{setPreview(null);void transfer('export',[preview.id]);}}><Download size={15}/>{t('cameraCard.export_folder')}</button></div></div></Modal>}
   </section>;
