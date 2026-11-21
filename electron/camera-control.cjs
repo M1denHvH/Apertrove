@@ -14,7 +14,7 @@ function createCameraControl(io){
     throw last||Error('Камера не подтвердила режим AF.');
   }
   async function exclusive(fn){
-    io.ensure();if(io.isCapturing()||active||servoControl.isBusy())throw Error('Дождитесь завершения текущей команды камеры.');
+    io.ensure();if(io.isCapturing()||active||servoControl.isBusy()||servoControl.isHeld())throw Error('Дождитесь завершения текущей команды камеры.');
     active=true;try{return await fn();}finally{active=false;}
   }
   async function property({key,value}){
@@ -101,6 +101,6 @@ function createCameraControl(io){
       io.onAutofocus?.(result);io.log?.(result.confirmed?'success':'info',result.confirmed?'Автофокус: резкость подтверждена камерой.':'Команда AF выполнена; попадание в фокус не подтверждено.');return result;
     });
   }
-  return {property,focus,autofocus,servo:servoControl.set,stopServo:servoControl.stop,servoDisconnected:servoControl.disconnected,servoState:servoControl.snapshot,isServoBusy:servoControl.isBusy,isBusy:()=>active||servoControl.isBusy(),canStream:()=>!active||autofocusing};
+  return {property,focus,autofocus,servo:servoControl.set,stopServo:servoControl.stop,servoDisconnected:servoControl.disconnected,servoConnected:servoControl.connected,servoState:servoControl.snapshot,isServoBusy:servoControl.isBusy,isServoHeld:servoControl.isHeld,releaseAfterCapture:servoControl.releaseAfterCapture,isBusy:()=>active||servoControl.isBusy(),canStream:()=>!active||autofocusing};
 }
 module.exports={createCameraControl,COMMANDS};

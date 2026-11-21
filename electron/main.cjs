@@ -55,15 +55,63 @@ let importQueue=Promise.resolve(),workerState=null;const assets=new Map(),applic
 let consumerRevision=0,importFailures=0;
 const lifecycleIssues=new Set();let diagnosticTail=Promise.resolve(),runtimeQuarantined=false;
 function lifecycleIssue(code){if(lifecycleIssues.size<32)lifecycleIssues.add(code);}
-let burst=null,series=null,sessionTransition=false,captureMetadata=null,focusPreview=null,accessoryBusy=false,controlBusy=false;
+let burst=null,series=null,sessionTransition=false,captureMetadata=null,focusPreview=null,accessoryBusy=false,controlBusy=false,servoTransition=null,captureQueued=false,pendingBurstStart=null;
 const burstActive=()=>burst&&['holding','transferring'].includes(burst.status);
 const seriesActive=()=>series&&['running','stopping','restoring'].includes(series.status);
-const servoActive=()=>camera.servo?.enabled===true||camera.servo?.enabled===null||['starting','running','stopping'].includes(camera.servo?.status);
+const servoActive=()=>camera.connected&&(camera.servo?.enabled===true||camera.servo?.enabled===null||['starting','running','stopping'].includes(camera.servo?.status));
+const servoCaptureBlocked=()=>servoActive()&&!(camera.servo?.enabled===true&&camera.servo?.status==='running');
 const bulbActive=()=>['starting','exposing','stopping'].includes(camera.bulb?.status)||camera.bulb?.status==='error'&&camera.bulb?.confirmation==='unknown';
 function requireSession(){if(!store.sessions.some(s=>s.id===store.sessionId))throw Error('Создайте или откройте фотосессию.');}
 function nativeOwned(){return !!workerState&&!workerState.exited&&(workerState.rpc.hasOutstanding()||!workerState.rpc.snapshot().admissionOpen);}
 function cameraIdle({allowServo=false}={}){if(runtimeQuarantined)throw Error(t('operation.unknown'));if(quitting||nativeOwned()||bulbActive()||!allowServo&&servoActive()||seriesActive()||burstActive()||interval||captureActive||sessionTransition||accessoryBusy||controlBusy)throw Error('Дождитесь окончания текущей команды камеры.');}
 async function cameraCommand(method,args){cameraIdle({allowServo:['servo','live','property'].includes(method)});controlBusy=true;remote?.publishState();try{return await call(method,args);}finally{controlBusy=false;remote?.publishState();}}
+function setServo(enabled){
+  if(typeof enabled!=='boolean')throw Error('Некорректное состояние AI Servo.');
+  if(servoTransition){if(servoTransition.enabled===enabled)return servoTransition.promise;throw Error('Дождитесь переключения AI Servo.');}
+  if(!enabled&&(captureActive||controlBusy))throw Error('Дождитесь окончания текущей команды камеры.');
+  const channel=workerState,epoch=channel?.nativeEpoch;
+  const promise=enabled?cameraCommand('servo',{enabled:true}):(async()=>{
+    controlBusy=true;remote?.publishState();try{return worker?await call('servoStop'):camera;}finally{controlBusy=false;remote?.publishState();}
+  })();
+  const transition={enabled,channel,epoch,promise};servoTransition=transition;
+  const settled=()=>{if(servoTransition===transition)servoTransition=null;};promise.then(settled,settled);
+  return promise;
+}
+async function withShutterControl(command){
+  if(captureQueued)throw Error('Предыдущий кадр ещё ожидает завершения команды камеры.');
+  captureQueued=true;
+  try{
+    const transition=servoTransition;
+    if(transition){
+      // Keep a shutter intent behind the finite toggle request. It is never
+      // admitted concurrently to the SDK, nor replayed into a new session.
+      await transition.promise;
+      if(workerState!==transition.channel||workerState?.nativeEpoch!==transition.epoch)throw Object.assign(Error(t('operation.stale')),{code:'OPERATION_STALE_SESSION'});
+    }
+    cameraIdle({allowServo:true});
+    if(servoCaptureBlocked())throw Error('Состояние AI Servo не подтверждено. Остановите AI Servo или отключите камеру.');
+    if(interval)throw Error('Сначала остановите интервальную съёмку.');
+    return await command();
+  }finally{captureQueued=false;}
+}
+function captureFromControl(){return withShutterControl(()=>capture());}
+function burstFromControl({seconds=5}={}){
+  if(pendingBurstStart)throw Error('Камера занята.');
+  const intent={released:false};pendingBurstStart=intent;
+  return withShutterControl(()=>{
+    // Pointer/key release can precede completion of a queued Servo toggle.
+    // That released intent must never start a later five-second shutter hold.
+    if(intent.released)return {status:'cancelled',shots:0};
+    requireSession();if(captureActive)throw Error('Камера занята.');
+    if(![1,4,5].includes(camera.properties.driveMode?.value))throw Error('Выберите серийный режим камеры.');
+    seconds=Number(seconds);if(!Number.isFinite(seconds)||seconds<.1||seconds>5)throw Error('Удержание: от 0.1 до 5 секунд.');
+    burst={id:crypto.randomUUID(),status:'holding',shots:0,seconds,startedAt:Date.now()};emit('burst',{...burst});
+    trackApplication(capture({burstMs:Math.round(seconds*1000)},{burstId:burst.id}).then(async result=>{
+      await importQueue;burst={...burst,status:result.confirmation==='CONFIRMED'?'completed':'unconfirmed',shots:result.confirmation==='CONFIRMED'?result.shots:0,observedTransfers:result.observedTransfers||0};emit('burst',burst);
+    }).catch(error=>{burst={...burst,status:'failed',error:error.message};emit('burst',burst);log('error',error.message);}));
+    return {...burst};
+  }).finally(()=>{if(pendingBurstStart===intent)pendingBurstStart=null;});
+}
 function sessionIdle(allowWatcher=false){if(quitting||nativeOwned()||bulbActive()||servoActive()||accessoryBusy||controlBusy||seriesActive()||burstActive()||interval||captureActive||watcher&&!allowWatcher||sessionTransition)throw Error('Остановите текущую съёмку и автоимпорт перед сменой фотосессии.');}
 const sessionsRoot=()=>path.join(process.env.FOCAL_TEST_DATA?path.join(process.env.FOCAL_TEST_DATA,'Pictures'):app.getPath('pictures'),'Apertrove');
 const {languages, supportedLocales, resolve: resolveLocale, migrate: migrateLanguage, register, setLocale, legacy:ltext, t, starterPresetLabel}=require('./i18n/runtime.js');
@@ -84,7 +132,7 @@ function publicPhoto(p){return {...p,thumb:asset(p.thumbPath),preview:asset(p.pr
 const operationState=()=>({busy:nativeOwned(),ledger:workerState?.rpc.snapshot()||null});
 const lastReceivedPhotoId=()=>store.photos.findLast(photo=>photo.cameraTransfer===true)?.id??null;
 const publicState=()=>({...store,lastReceivedPhotoId:lastReceivedPhotoId(),locale:currentLocale(),appearance:currentAppearance(),showOnboarding:!store.settings.onboarding.completed&&(!process.env.FOCAL_TEST_DATA||process.env.FOCAL_TEST_ONBOARDING==='1'),photos:store.photos.map(publicPhoto),camera,cameras:knownCameras,remote:remoteInfo,interfaces:localInterfaces(),logs,interval,series,burst,focusPreview,captureState:{active:captureActive},operationState:operationState(),values:VALUES,watching:!!watcher,bootFailure:null});
-function remoteState(){const session=store.sessions.find(s=>s.id===store.sessionId);return {locale:currentLocale(),appearance:currentAppearance(),camera:Object.fromEntries(['connected','live','model','mode','battery','properties','cameraId','connectedAt','capabilities','saveTo','liveStats','autofocus','servo','bulb','focusInfo','error'].map(key=>[key,camera[key]])),cameras:knownCameras,session:{name:session?.name,queueLength:session?.presetQueue?.length||0,count:session?store.photos.filter(p=>p.sessionId===session.id).length:0},presets:store.presets.map(p=>({id:p.id,name:starterPresetLabel(p,'name')})),interval,series,burst,focusPreview:camera.live?null:focusPreview,composition:store.settings.composition,busy:nativeOwned()||servoActive()||bulbActive()||captureActive||!!seriesActive()||accessoryBusy||controlBusy||sessionTransition};}
+function remoteState(){const session=store.sessions.find(s=>s.id===store.sessionId);return {locale:currentLocale(),appearance:currentAppearance(),camera:Object.fromEntries(['connected','live','model','mode','battery','properties','cameraId','connectedAt','capabilities','saveTo','liveStats','autofocus','servo','bulb','focusInfo','error'].map(key=>[key,camera[key]])),cameras:knownCameras,session:{name:session?.name,queueLength:session?.presetQueue?.length||0,count:session?store.photos.filter(p=>p.sessionId===session.id).length:0},presets:store.presets.map(p=>({id:p.id,name:starterPresetLabel(p,'name')})),interval,series,burst,focusPreview:camera.live?null:focusPreview,composition:store.settings.composition,busy:nativeOwned()||servoCaptureBlocked()||bulbActive()||captureActive||!!seriesActive()||accessoryBusy||controlBusy||sessionTransition};}
 function flushDesktopFrame(){if(desktopFrameInFlight||!pendingDesktopFrame||!win||win.isDestroyed())return;const frame=pendingDesktopFrame;pendingDesktopFrame=null;desktopFrameInFlight=true;win.webContents.send('focal:frame',frame);}
 function publishFrame(bytes){remote?.publishFrame(bytes);pendingDesktopFrame=bytes;flushDesktopFrame();}
 function trackApplication(value){const job=Promise.resolve(value);applicationTasks.add(job);job.then(()=>applicationTasks.delete(job),()=>applicationTasks.delete(job));return job;}
@@ -258,16 +306,12 @@ function installHandlers(){
     listCameras:()=>withRuntime(async sdkDir=>{knownCameras=await call('listCameras',{sdkDir});emit('cameras',knownCameras);return knownCameras;}),
     connect:({cameraId}={})=>connectCamera({cameraId}),
     disconnect:()=>{cameraIdle({allowServo:true});return call('disconnect');},live:a=>cameraCommand('live',a),property:a=>cameraCommand('property',a),focus:a=>cameraCommand('focus',a),autofocus:()=>{cameraIdle();focusPreview=null;emit('focusPreview',null);return cameraCommand('autofocus',{preview:store.settings.focusPreviewOnSuccess!==false});},
-    servo:({enabled}={})=>{
-      if(typeof enabled!=='boolean')throw Error('Некорректное состояние AI Servo.');
-      if(!enabled)return worker?call('servoStop'):camera;
-      return cameraCommand('servo',{enabled:true});
-    },
+    servo:({enabled}={})=>setServo(enabled),
     bulbStart:args=>cameraCommand('bulbStart',args),
     bulbStop:()=>worker?call('bulbStop'):camera,
     flashSupport:async()=>flashAvailability(camera,camera.connected?await flashBridge.cached(camera.model):{}),
     flashPopup:async()=>{cameraIdle();if(!camera.connected)throw Error('Сначала подключите камеру.');return flashBridge.popup(camera.model);},
-    capture:()=>{cameraIdle();if(interval)throw Error('Сначала остановите интервальную съёмку.');return capture();},
+    capture:captureFromControl,
     chooseFolder:async({kind})=>{if(!['captureFolder','watchFolder','sdkDir'].includes(kind))throw Error('Неизвестная папка.');if(kind==='sdkDir')return chooseSdkFolder();if((kind==='captureFolder'&&(captureActive||interval||watcher))||(kind==='watchFolder'&&watcher))throw Error('Сначала остановите текущую операцию.');const dir=await choose(['openDirectory','createDirectory'],'Выберите папку');if(dir){if(kind==='captureFolder'){requireSession();sessionIdle();if(camera.connected)await call('destination',{folder:dir});store.sessions.find(s=>s.id===store.sessionId).captureFolder=dir;}store.settings[kind]=dir;await persist();emit('settings',store.settings);}return dir;},
     importFiles:()=>sessionAction(async()=>{requireSession();const res=await dialog.showOpenDialog(win,{title:ltext('Импорт фотографий'),properties:['openFile','multiSelections'],filters:[{name:ltext('Фотографии и RAW'),extensions:[...L.EXTENSIONS].map(s=>s.slice(1))}]});return res.canceled?null:queueImport(res.filePaths,true);},{allowWatcher:true}),
     photoDelete:a=>sessionAction(async()=>{
@@ -332,8 +376,8 @@ function installHandlers(){
     chooseSessionFolder:()=>choose(['openDirectory','createDirectory'],'Папка фотосессии'),
     seriesQueue:async({ids})=>{cameraIdle();requireSession();if(!Array.isArray(ids)||ids.length>100||ids.some(id=>typeof id!=='string'||id.length>128))throw Error('Некорректная очередь пресетов.');store.sessions.find(s=>s.id===store.sessionId).presetQueue=[...ids];await persist();emit('state',publicState());return ids;},
     seriesStart:startSeries,
-    burstStart:({seconds=5}={})=>{cameraIdle();requireSession();if(captureActive)throw Error('Камера занята.');if(![1,4,5].includes(camera.properties.driveMode?.value))throw Error('Выберите серийный режим камеры.');seconds=Number(seconds);if(!Number.isFinite(seconds)||seconds<.1||seconds>5)throw Error('Удержание: от 0.1 до 5 секунд.');burst={id:crypto.randomUUID(),status:'holding',shots:0,seconds,startedAt:Date.now()};emit('burst',{...burst});trackApplication(capture({burstMs:Math.round(seconds*1000)},{burstId:burst.id}).then(async result=>{await importQueue;burst={...burst,status:result.confirmation==='CONFIRMED'?'completed':'unconfirmed',shots:result.confirmation==='CONFIRMED'?result.shots:0,observedTransfers:result.observedTransfers||0};emit('burst',burst);}).catch(error=>{burst={...burst,status:'failed',error:error.message};emit('burst',burst);log('error',error.message);}));return {...burst};},
-    burstStop:async()=>{if(burstActive()){burst.status='transferring';emit('burst',{...burst});}if(worker)await call('burstStop');return burst;},
+    burstStart:burstFromControl,
+    burstStop:async()=>{if(pendingBurstStart)pendingBurstStart.released=true;if(burstActive()){burst.status='transferring';emit('burst',{...burst});}if(worker)await call('burstStop');return burst;},
     seriesStop:()=>{if(seriesActive()){series.cancelled=true;series.status='stopping';emit('series',{...series});}return true;},
     equipment:async()=>{if(camera.connected&&!captureActive&&!seriesActive()&&!burstActive())await call('status');return equipmentCards(camera,store);},
     equipmentPhoto:async({kind})=>{if(!['camera','lens'].includes(kind))throw Error('Неизвестный тип оборудования.');const name=kind==='camera'?camera.model:camera.equipment?.lensName;const media=await productMedia(kind,name,cacheDir);return {...media,image:asset(media.image)};},

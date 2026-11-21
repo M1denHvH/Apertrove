@@ -1692,5 +1692,17 @@
   "legacy.cameraLifecycle.servo_start": "Starting AI Servo",
   "legacy.cameraLifecycle.servo_disconnected": "Connection lost before AI Servo release was confirmed.",
   "desktop.servo_starting": "Starting AI Servo…",
-  "legacy.cameraLifecycle.servo_release_before_command": "Stop AI Servo before another camera command."
+  "legacy.cameraLifecycle.servo_release_before_command": "Stop AI Servo before another camera command.",
+  "desktop.af_options": "Autofocus actions",
+  "desktop.af_one_shot": "One Shot AF",
+  "desktop.servo_stop": "Stop AI Servo",
+  "desktop.live_rotate": "Rotate Live View",
+  "desktop.live_rotation_manual": "Live View: {{angle}}° (manual). Rotate 90° clockwise.",
+  "desktop.live_rotation_auto": "Live View: {{angle}}° (camera). Rotate manually.",
+  "desktop.live_rotation_restore_auto": "Use camera orientation",
+  "legacy.cameraLifecycle.servo_capture_queued": "A shutter request is already waiting for the camera command.",
+  "legacy.cameraLifecycle.servo_capture_unknown": "AI Servo state is unconfirmed. Stop AI Servo or disconnect the camera.",
+  "legacy.cameraLifecycle.servo_reconnect": "Reconnect the camera before starting AI Servo.",
+  "legacy.cameraLifecycle.servo_not_released": "The previous AI Servo hold has not been released.",
+  "legacy.cameraLifecycle.servo_capture_release": "AI Servo state does not allow a verified shutter release."
 }

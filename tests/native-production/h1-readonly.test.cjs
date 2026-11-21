@@ -44,7 +44,7 @@ test('read-only connect opens one session without registering native event handl
     camera:null,sdk:{list(out){out[0]='list';return 0;},count(_ref,out){out[0]=1;return 0;},child(_ref,_index,out){out[0]='camera';return 0;},info(){return 0;},
       objectHandler(){calls.push('objectHandler');return 0;},propertyHandler(){calls.push('propertyHandler');return 0;},stateHandler(){calls.push('stateHandler');return 0;}},
     destination:'',sessionEpoch:0,evidence:{},state:{},restricted:false,teardownUncertain:false,captureWait:null,
-    controls:{isBusy:()=>false},transferProducer:{drain:async()=>{}},setDeliveryRoute:()=>{},load:()=>{},
+    controls:{isBusy:()=>false,servoConnected:()=>calls.push('servo-session-reset')},transferProducer:{drain:async()=>{}},setDeliveryRoute:()=>{},load:()=>{},
     listCameras:()=>[selected],selectCamera:()=>selected,describeCamera:()=>selected,
     releaseRef:()=>true,check(code){assert.equal(code,0);},openCameraSession(){calls.push('open');},
     textProperty:()=>selected.model,modelCapabilities:()=>({capture:true}),log:()=>{},
@@ -54,7 +54,7 @@ test('read-only connect opens one session without registering native event handl
   });
   new vm.Script(source+'\nthis.connect=connect;').runInContext(context);
   await context.connect({cameraId:selected.id,readOnly:true,folder:'synthetic'});
-  assert.deepEqual(calls,['open','refresh']);
+  assert.deepEqual(calls,['open','servo-session-reset','refresh']);
   assert.equal(context.state.working,false);
   assert.equal(context.state.eventsRegistered,false);
   assert.equal(context.state.saveTo,null);

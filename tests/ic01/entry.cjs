@@ -11,7 +11,7 @@ for(let file=fixtureRoot;;file=path.dirname(file)){if(fs.lstatSync(file).isSymbo
 const dataFolder=path.join(fixtureRoot,'user-data');fs.mkdirSync(dataFolder,{recursive:true});
 for(const key of ['USERPROFILE','APPDATA','LOCALAPPDATA','TEMP','TMP']){const value=process.env[key];if(!value||!inside(fixtureRoot,path.resolve(value)))throw Error('IC01_PROFILE_ENVIRONMENT_REQUIRED');fs.mkdirSync(value,{recursive:true});}
 const configFile=path.join(fixtureRoot,'config.json'),config=fs.existsSync(configFile)?JSON.parse(fs.readFileSync(configFile,'utf8')):{};
-if(Object.keys(config).some(key=>!['readFault'].includes(key)))throw Error('IC01_UNKNOWN_FIXTURE_CONFIGURATION');
+if(Object.keys(config).some(key=>!['readFault','extendedUiDeadline'].includes(key))||config.extendedUiDeadline!==undefined&&config.extendedUiDeadline!==true)throw Error('IC01_UNKNOWN_FIXTURE_CONFIGURATION');
 const paths={userData:dataFolder,sessionData:path.join(fixtureRoot,'chromium'),appData:process.env.APPDATA,temp:process.env.TEMP,crashDumps:path.join(fixtureRoot,'crashes')};
 for(const [key,value]of Object.entries(paths)){fs.mkdirSync(value,{recursive:true});app.setPath(key,value);}
 app.setAppPath(ROOT);app.setAppLogsPath(path.join(fixtureRoot,'logs'));
@@ -63,8 +63,8 @@ app.on('browser-window-created',(_event,window)=>{cap(observations.windows,{id:w
 app.on('child-process-gone',(_event,details)=>cap(observations.childEvents,{type:details.type,reason:details.reason,exitCode:details.exitCode}));
 const {createFakeCamera}=require('./admission.cjs'),camera=createFakeCamera({app,fixtureRoot});
 let main=null,currentWorker=null,workerReady=false,workerHistory=[];
-const flash={createFlashBridge:()=>({probe:async()=>({available:false,canAttempt:false,synthetic:true}),cached:async()=>({available:false,canAttempt:false,synthetic:true}),popup:async()=>deny('WIA')}),withFlashConnection:async()=>deny('WIA'),flashAvailability:()=>({available:false,canAttempt:false,synthetic:true})};
-require('../../electron/integration-composition.cjs').install({fixtureRoot,dataFolder,camera,flash,requestTimeoutMs:method=>['capture','importCard'].includes(method)?180:null,onWorker:(worker,channel)=>{currentWorker={worker,channel};workerHistory.push(channel.generation);workerReady=false;worker.on('message',message=>{if(message.event==='ready')workerReady=true;});},onReady:value=>{main=value;}});
+const flash={createFlashBridge:()=>({probe:async()=>({available:false,canAttempt:false,synthetic:true}),cached:async()=>({available:false,canAttempt:false,synthetic:true}),popup:async()=>{throw Object.assign(Error('Synthetic flash popup protocol is unavailable.'),{code:'FLASH_POPUP_PROTOCOL_UNQUALIFIED'});}}),withFlashConnection:async()=>deny('WIA'),flashAvailability:()=>({available:false,canAttempt:false,synthetic:true})};
+require('../../electron/integration-composition.cjs').install({fixtureRoot,dataFolder,camera,flash,requestTimeoutMs:method=>['capture','importCard'].includes(method)?config.extendedUiDeadline?3000:180:null,onWorker:(worker,channel)=>{currentWorker={worker,channel};workerHistory.push(channel.generation);workerReady=false;worker.on('message',message=>{if(message.event==='ready')workerReady=true;});},onReady:value=>{main=value;}});
 function snapshot(){try{return main?.getState()||null;}catch{return null;}}
 function metrics(){try{return app.getAppMetrics().map(value=>({pid:value.pid,type:value.type,serviceName:value.serviceName||null,name:value.name||null}));}catch{return[];}}
 function info(){return {electronVersion:process.versions.electron,versions:{electron:process.versions.electron,node:process.versions.node,chrome:process.versions.chrome},processId:process.pid,processes:metrics(),paths,fixtureRoot,observations,guard:guard.evidence(),provider:camera.evidence(),workerReady,workerGenerations:[...workerHistory],operationState:snapshot()?.operationState||null,shutdown:main?.shutdown.getState()||null};}

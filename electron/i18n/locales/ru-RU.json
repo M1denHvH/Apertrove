@@ -1716,5 +1716,17 @@
   "legacy.cameraLifecycle.servo_start": "Запуск AI Servo",
   "legacy.cameraLifecycle.servo_disconnected": "Соединение потеряно до подтверждения остановки AI Servo.",
   "desktop.servo_starting": "Включение AI Servo…",
-  "legacy.cameraLifecycle.servo_release_before_command": "Остановите AI Servo перед другой командой камеры."
+  "legacy.cameraLifecycle.servo_release_before_command": "Остановите AI Servo перед другой командой камеры.",
+  "desktop.af_options": "Управление автофокусом",
+  "desktop.af_one_shot": "One Shot AF",
+  "desktop.servo_stop": "Остановить AI Servo",
+  "desktop.live_rotate": "Повернуть Live View",
+  "desktop.live_rotation_manual": "Live View: {{angle}}° (вручную). Повернуть на 90° по часовой стрелке.",
+  "desktop.live_rotation_auto": "Live View: {{angle}}° (данные камеры). Повернуть вручную.",
+  "desktop.live_rotation_restore_auto": "Использовать ориентацию камеры",
+  "legacy.cameraLifecycle.servo_capture_queued": "Предыдущий кадр ещё ожидает завершения команды камеры.",
+  "legacy.cameraLifecycle.servo_capture_unknown": "Состояние AI Servo не подтверждено. Остановите AI Servo или отключите камеру.",
+  "legacy.cameraLifecycle.servo_reconnect": "Повторно подключите камеру перед запуском AI Servo.",
+  "legacy.cameraLifecycle.servo_not_released": "Предыдущий AI Servo ещё не освобождён.",
+  "legacy.cameraLifecycle.servo_capture_release": "Состояние AI Servo не позволяет отпустить затвор."
 }

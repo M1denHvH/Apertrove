@@ -14,16 +14,16 @@ async function main(){
   const slice=segment('function failCapture(','function disconnect(')+segment('function capture(','async function listCard(');
   assert.ok(!/\brequire\s*\(|\bprocess\b|\bkoffi\b|\bfs\s*\.|\beval\s*\(|\bFunction\s*\(/.test(slice));
   const results=[];let expired=false;const watchdog=setTimeout(()=>{expired=true;console.error('S2C_CAPTURE_BUDGET');process.exit(1);},10000);
-  function fixture({press=0,release=0,burst=false}={}){
+  function fixture({press=0,release=0,burst=false,servo=false}={}){
     let now=0,next=0;const timers=new Map(),commands=[],events=[],settlements=[];
     const clock={setTimeout(fn,ms){const id=++next;timers.set(id,{at:now+ms,fn});return id;},clearTimeout(id){timers.delete(id);}};
     const operationError=(code,message)=>Object.assign(Error(message),{code});
-    const sandbox={...clock,console:undefined,module:{exports:{}},camera:{fake:true},captureWait:null,sessionEpoch:1,destination:'synthetic',controls:{isBusy:()=>false},state:{capabilities:{capture:true}},
+    const sandbox={...clock,console:undefined,module:{exports:{}},camera:{fake:true},captureWait:null,sessionEpoch:1,destination:'synthetic',PROPS:{shutter:0x406},controls:{isBusy:()=>false,releaseAfterCapture:fn=>fn(servo?1:0)},state:{capabilities:{capture:true}},
       ensureWorking(){},setDeliveryRoute(){},get:id=>id===0x401?(burst?1:0):0,quietPeriod:()=>650,
       isUnsupportedCommand:code=>code===7,operationError,
       check(code){if(code)throw Object.assign(Error('Synthetic primary failure'),{code});},
       transfers:{noteCapture(){},settleCapture(id,result){settlements.push({id,...result});}},send:event=>events.push(event),
-      sdk:{command(_camera,id,value){commands.push({id,value});const outcome=id===4&&value===0?release:press;if(outcome instanceof Error)throw outcome;return outcome;}}
+      sdk:{command(_camera,id,value){commands.push({id,value});const outcome=id===4&&[0,1].includes(value)?release:press;if(outcome instanceof Error)throw outcome;return outcome;}}
     };
     const context=vm.createContext(sandbox,{codeGeneration:{strings:false,wasm:false}});
     new vm.Script(sources['electron/native-observations.cjs']+'\nthis.observations=module.exports.createNativeObservations();').runInContext(context,{timeout:1000});
@@ -44,6 +44,8 @@ async function main(){
     await test('manual quiet receipt never guarantees a complete RAW JPEG capture',async()=>{const f=fixture(),p=f.start();f.transfer();f.advance(650);const receipt=await p;assert.equal(receipt.confirmation,'UNVERIFIED');assert.equal(receipt.nativeQuiescence,'UNKNOWN');assert.equal(receipt.shots,0);assert.equal(receipt.files.length,0);assert.equal(receipt.observedTransfers,1);});
     await test('producer capture deadline is UNKNOWN rather than safe completion',async()=>{const f=fixture(),p=f.start();f.advance(75000);await assert.rejects(p,error=>error.code==='OPERATION_UNKNOWN_TERMINATION');assert.equal(f.settlements[0].outcome,'UNKNOWN_TERMINATION');});
     await test('normal manual burst release preserves press release and unverified receipt',async()=>{const f=fixture({burst:true}),p=f.start();f.transfer();f.context.api.stopBurst();f.advance(650);assert.equal((await p).confirmation,'UNVERIFIED');assert.equal(f.commands.length,2);assert.equal(f.commands[1].value,0);assert.equal(f.events.filter(event=>event.event==='burstReleased').length,1);});
+    await test('Servo viewfinder single capture returns to half-press without an AF OFF',async()=>{const f=fixture({servo:true}),p=f.start();f.transfer();f.advance(650);assert.equal((await p).observedTransfers,1);assert.deepEqual(f.commands,[{id:4,value:3},{id:4,value:1}]);});
+    await test('Servo viewfinder burst returns to half-press on manual release and keeps transfer events',async()=>{const f=fixture({servo:true,burst:true}),p=f.start();f.transfer();f.context.api.stopBurst();f.advance(650);assert.equal((await p).observedTransfers,1);assert.deepEqual(f.commands,[{id:4,value:3},{id:4,value:1}]);});
     await test('unsupported press fallback preserves source native command order',async()=>{const f=fixture({press:7}),p=f.start();await assert.rejects(p,error=>error.code===7);assert.deepEqual(f.commands.map(item=>item.id),[4,0,4]);assert.equal(f.commands[2].value,0);});
   }finally{clearTimeout(watchdog);}
   const pass=results.filter(row=>row.status==='PASS').length,fail=results.length-pass;

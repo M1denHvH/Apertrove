@@ -3,15 +3,19 @@
 const { PROPS } = require('./camera-values.cjs');
 function createServoFocus(io) {
   let state = { enabled:false, status:'off', confirmation:'command-accepted', trackingConfirmed:false };
-  let restoreMode, command, owedStop = false, changing = false;
+  let restoreMode, command, owedStop = false, changing = false, sessionValid = true;
   const publish = patch => { state = { ...state, ...patch, trackingConfirmed:false }; io.onState?.({ ...state }); return { ...state }; };
-  const busy = () => changing || owedStop;
+  // A held, accepted Servo command is a mode, not an unfinished request. Only
+  // a transition or uncertain release excludes capture; AF ownership is separate.
+  const busy = () => changing || sessionValid && state.enabled === null;
   function stop() {
     if (changing) throw Error('Дождитесь переключения AI Servo.');
     if (!owedStop) return { ...state };
+    changing = true;
     publish({ status:'stopping' });
     try { io.command(command, 0, 'Остановка AI Servo'); }
     catch (error) {
+      changing = false;
       publish({ enabled:null, status:'error', confirmation:'unknown', error:error.message });
       io.onUnknown?.(error);
       throw error;
@@ -29,7 +33,7 @@ function createServoFocus(io) {
       restoreMode = undefined;
       publish({ enabled:false, status:'error', confirmation:'command-accepted', error:error.message });
       throw error;
-    }
+    } finally { changing = false; }
   }
   function set({ enabled } = {}) {
     if (typeof enabled !== 'boolean') throw Error('Некорректное состояние AI Servo.');
@@ -40,6 +44,7 @@ function createServoFocus(io) {
       throw Error('Остановка AI Servo не подтверждена. Отключите камеру.');
     }
     io.ensure();
+    if (!sessionValid) throw Error('Повторно подключите камеру перед запуском AI Servo.');
     if (io.isCapturing?.() || io.isBusy?.()) throw Error('Дождитесь завершения текущей команды камеры.');
     if (io.canFocus?.() === false) throw Error('Объектив в MF. Переведите его переключатель в AF.');
     if (io.requiresLiveFocus?.() && !io.isLive()) throw Error('Для AI Servo включите Live View.');
@@ -74,9 +79,34 @@ function createServoFocus(io) {
   }
   function disconnected() {
     const unknown = owedStop;
-    owedStop = false; restoreMode = undefined; changing = false;
+    owedStop = false; restoreMode = undefined; changing = false; sessionValid = false;
     return publish({ enabled:unknown ? null : false, status:'disconnected', confirmation:unknown ? 'unknown' : 'command-accepted', error:unknown ? 'Соединение потеряно до подтверждения остановки AI Servo.' : undefined });
   }
-  return { set, stop, disconnected, isBusy:busy, snapshot:() => ({ ...state }) };
+  function connected() {
+    if (owedStop || changing) throw Error('Предыдущий AI Servo ещё не освобождён.');
+    sessionValid = true; restoreMode = undefined; command = undefined;
+    return publish({ enabled:false, status:'off', confirmation:'command-accepted', method:undefined, error:undefined });
+  }
+  function releaseAfterCapture(release) {
+    const uncertain = busy();
+    // PressShutterButton Completely -> Halfway keeps viewfinder Servo held.
+    // EVF AF is a separate command; releasing the shutter does not release it.
+    const halfway = !uncertain && owedStop && state.enabled === true && command === 4;
+    try {
+      const result = release(halfway ? 1 : 0);
+      // A safety release must still be attempted if state became uncertain
+      // after capture admission. It cannot turn that outcome into success.
+      if (uncertain) throw Error('Состояние AI Servo не позволяет отпустить затвор.');
+      return result;
+    }
+    catch (error) {
+      if (owedStop) {
+        publish({ enabled:null, status:'error', confirmation:'unknown', error:error.message });
+        io.onUnknown?.(error);
+      }
+      throw error;
+    }
+  }
+  return { set, stop, disconnected, connected, releaseAfterCapture, isBusy:busy, isHeld:() => owedStop, snapshot:() => ({ ...state }) };
 }
 module.exports = { createServoFocus };

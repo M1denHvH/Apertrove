@@ -1,5 +1,12 @@
-.servo-control{margin-top:10px}
-.servo-toggle{width:100%;justify-content:center}
+.af-control{min-width:0}
+.af-control-buttons{display:flex;align-items:stretch}
+.af-control-buttons>.af-primary{border-start-end-radius:0;border-end-end-radius:0;min-width:62px}
+.af-control-buttons>.af-mode-toggle{border-start-start-radius:0;border-end-start-radius:0;border-left:0;padding-inline:6px}
+.af-control .camera-operation-note{max-width:170px}
+.af-options>button{display:flex;align-items:center;gap:9px;width:100%;min-height:38px;padding:9px 12px;border-radius:5px;text-align:left;line-height:1.5;font-size:12px}
+.af-options>button:hover:not(:disabled),.af-options>button:focus-visible{background:var(--surface-hover)}
+.af-options>button[aria-checked=true]{background:var(--accent-soft);color:var(--accent-ink)}
+.af-options>button[role=menuitemcheckbox]{justify-content:space-between}
 .camera-operation-note{margin-top:6px;font-size:10px;line-height:1.5;color:var(--readable-secondary);overflow-wrap:anywhere}
 .camera-operation-note.error{color:var(--error-text)}
 .bulb-control{margin-top:10px;padding:8px 0;border-top:1px solid var(--border)}
