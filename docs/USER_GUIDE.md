@@ -66,11 +66,11 @@ In single drive, **Take photo** makes one shutter request. A short press include
 
 In a supported continuous drive mode, hold the shutter button to shoot a series and release it to stop. Keyboard Space/Enter on the focused series button follows the same hold/release pattern. Leaving the application or cancelling the input ends the hold. The maximum hold limit is a fallback, not the intended length of a short click. Active AI Servo should preserve these input meanings.
 
-Wait for the save operation and inspect the received file. Live View and an AF preview are not saved photographs. A message that capture completion is unverified means the app could not prove the complete result; check the camera, card and output folder before repeating it.
+Wait for the save operation and inspect the received file. Live View and an AF preview are not saved photographs. A photograph counts as received after its original is saved and its Library entry is committed, including when it has no photo session. An uncertain shutter acknowledgement alone does not make that received photograph unsuccessful. If no file can be confirmed or registration fails, the app keeps the corresponding warning or error; check the camera, card and output folder before repeating the shot.
 
 ### Flash and BULB in development builds
 
-These controls become available only for verified camera/runtime combinations. Their physical behavior still needs hardware testing; an unavailable control is the fallback for an unrecognized combination.
+These controls become available only for verified camera/runtime combinations. [Camera support](COMPATIBILITY.md#testing-status) records the limited physical checks; other combinations still need testing and unrecognized combinations keep unavailable controls.
 
 Use **Raise flash** when offered for a camera with a built-in flash. Check the camera after the request: an accepted command alone does not confirm the mechanism's position. Flash mode, firing and physical pop-up remain separate operations.
 
@@ -110,7 +110,7 @@ Select files, then choose **Export to folder** to copy them to a destination on 
 
 The transfer shows progress and supports **Cancel**. Completed files are kept; a failed or cancelled file can be selected again. Existing names receive a numeric suffix instead of being overwritten. Refresh a folder to see new camera files; refreshing clears the previous selection.
 
-Previews appear when the camera supplies a usable JPEG thumbnail, including for some RAW files. Unsupported RAW/video previews use a file placeholder and metadata. Capture dates are omitted when their camera timestamp format is unverified. Initial Camera Card support is limited to the qualified runtime described in [Camera support](COMPATIBILITY.md); other setups show an unavailable state. This source adds browsing and export, with physical storage compatibility still requiring testing. Formatting and deleting files on the camera are not offered.
+Previews appear when the camera supplies a usable JPEG thumbnail, including for some RAW files. Unsupported RAW/video previews use a file placeholder and metadata. Capture dates are omitted when their camera timestamp format is unverified. Initial Camera Card support is limited to the qualified runtime described in [Camera support](COMPATIBILITY.md); other setups show an unavailable state. Browsing and one JPEG export have been checked on the listed setup; broader storage compatibility still needs testing. Formatting and deleting files on the camera are not offered.
 
 ## 6. Review in Shot Inspector
 
