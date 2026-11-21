@@ -1747,6 +1747,9 @@
   "legacy.accessory.diagnostic_flash_accepted": "Команда подъёма принята. Физическое положение вспышки не подтверждено.",
   "legacy.accessory.diagnostic_flash_available": "Команда подъёма доступна. Физическое положение вспышки не проверялось.",
   "legacy.accessory.diagnostic_flash_unconfirmed": "Поддержка подъёма вспышки не подтверждена.",
+  "desktop.bulb_hold": "Удерживать BULB",
+  "desktop.bulb_release": "Отпустите для завершения",
+  "legacy.hold.invalid_focus": "Некорректная команда удержания фокуса.",
   "card.choose_destination": "Выберите папку экспорта",
   "card.preview_too_large": "Превью камеры слишком большое для отображения.",
   "card.invalid_selection": "Выберите доступные файлы на карте камеры."

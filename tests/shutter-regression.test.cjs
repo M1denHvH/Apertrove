@@ -15,7 +15,7 @@ function rig({servo=true,legacy=false,pressError=false,releaseError=false}={}){
    shots++;active=true;captureReject=reject;
    try{latch=holdShutter({now:()=>clock,setTimer:(fn,ms)=>{timers.set(++sequence,{at:clock+ms,fn});return sequence;},clearTimer:id=>timers.delete(id),press:()=>{commands.push({value:3,at:clock});if(pressError)throw Error('press failed');},release:()=>focus.releaseAfterCapture(value=>{commands.push({value,at:clock});if(releaseError)throw Error('release failed');}),onReleased:()=>{active=false;if(!pressError&&!releaseError)resolve({confirmation:'UNVERIFIED'});},onError:reject},5000);}catch(error){active=false;reject(error);}
  }),burstStop:()=>{try{latch?.release();return {released:true};}catch(error){captureReject?.(error);throw error;}},status:()=>state};
- const context=vm.createContext({handlers,state,bulb:{isBusy:()=>false},currentOperation:null,controls:{isServoHeld:focus.isHeld},teardownUncertain:false,operationError:(code,message)=>Object.assign(Error(message),{code}),Object,Error},{codeGeneration:{strings:false,wasm:false}});
+ const context=vm.createContext({handlers,state,bulb:{isBusy:()=>false},focusHold:{isBusy:()=>false},currentOperation:null,controls:{isServoHeld:focus.isHeld},teardownUncertain:false,operationError:(code,message)=>Object.assign(Error(message),{code}),Object,Error},{codeGeneration:{strings:false,wasm:false}});
  let source=policy;if(legacy)source=source.replace("'capture','burstStop','servoStop'","'capture','servoStop'");
  new vm.Script(source+'\nthis.api=operationHandlers;').runInContext(context,{timeout:1000});
  const invoke=method=>context.api[method]({}, {operationId:'synthetic-'+(++sequence)});

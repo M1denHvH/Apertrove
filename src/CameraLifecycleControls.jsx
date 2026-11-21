@@ -3,6 +3,7 @@ import {createPortal} from 'react-dom';
 import {Focus,Play,Square,ChevronDown,Check} from 'lucide-react';
 import {t,legacy,number} from './i18n.js';
 import './camera-lifecycle-controls.css';
+import HoldButton from './HoldButton.jsx';
 
 export const servoHeld=camera=>!!camera.connected&&(camera.servo?.enabled===true||camera.servo?.enabled===null||['starting','stopping'].includes(camera.servo?.status));
 export const bulbHeld=camera=>!!camera.connected&&(['starting','exposing','stopping'].includes(camera.bulb?.status)||camera.bulb?.status==='error'&&camera.bulb?.confirmation==='unknown');
@@ -49,7 +50,7 @@ export function BulbControl({camera,busy,locked,onStart,onStop}){
   const elapsed=Number.isFinite(bulb.elapsedSeconds)&&bulb.elapsedSeconds>=0&&bulb.elapsedSource==='camera-event'?number(bulb.elapsedSeconds,{maximumFractionDigits:1}):null;
   const status=bulb.status==='starting'?t('desktop.bulb_starting'):bulb.status==='stopping'?t('desktop.bulb_stopping'):bulb.status==='exposing'?t('desktop.bulb_exposing'):null;
   return <div className="bulb-control" data-state={bulb.status||'idle'}>
-    <div className="bulb-control-row"><span className="bulb-mode">BULB</span><button type="button" className={'btn '+(held?'danger-quiet':'quiet')} aria-label={t(held?'desktop.bulb_stop':'desktop.bulb_start')} disabled={!camera.connected||!!busy||pending||!held&&(!available||locked||!isBulbMode(camera))} title={!available?t('desktop.bulb_unavailable'):!held&&!isBulbMode(camera)?t('desktop.bulb_requires_mode'):undefined} onClick={held?onStop:onStart}>{held?<Square size={14} aria-hidden="true"/>:<Play size={14} aria-hidden="true"/>}{t(held?'desktop.bulb_stop':'desktop.bulb_start')}</button></div>
+    <div className="bulb-control-row"><span className="bulb-mode">BULB</span><HoldButton className={'btn '+(held?'danger-quiet':'quiet')} aria-label={t('desktop.bulb_hold')} connected={camera.connected} disabled={!!busy||pending||held||!available||locked||!isBulbMode(camera)} title={!available?t('desktop.bulb_unavailable'):!isBulbMode(camera)?t('desktop.bulb_requires_mode'):t('desktop.bulb_hold')} onStart={onStart} onStop={onStop}>{held?<Square size={14} aria-hidden="true"/>:<Play size={14} aria-hidden="true"/>}{t(held?'desktop.bulb_release':'desktop.bulb_hold')}</HoldButton>{bulb.status==='error'&&bulb.confirmation==='unknown'&&<button type="button" className="btn danger-quiet" disabled={!camera.connected||!!busy||pending} onClick={onStop}>{t('desktop.bulb_stop')}</button>}</div>
     {status&&<div className="bulb-status" role="status"><span>{status}</span><output aria-label={t('desktop.bulb_elapsed')}>{elapsed===null?t('desktop.bulb_waiting'):elapsed+' s'}</output></div>}
     {bulb.status==='error'?<p className="camera-operation-note error" role="alert">{legacy(bulb.error)||t('desktop.bulb_unknown')}</p>:!available&&<p className="camera-operation-note">{t('desktop.bulb_unavailable')}</p>}
   </div>;

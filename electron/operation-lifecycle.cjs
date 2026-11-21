@@ -1,6 +1,6 @@
 // Transport ownership, independent of Electron, SDK bindings and filesystem ports.
 // A consumer deadline never proves producer completion or native cancellation.
-const SAFETY_METHODS=Object.freeze(['status','burstStop','servoStop','bulbStop','producerFence','finalizeShutdown']);
+const SAFETY_METHODS=Object.freeze(['status','burstStop','servoStop','bulbStop','focusStop','producerFence','finalizeShutdown']);
 const TERMINAL_STATES=Object.freeze(['COMPLETED','FAILED','CANCELLED','UNKNOWN_TERMINATION']);
 const safetyDefault=method=>SAFETY_METHODS.includes(method);
 const exclusiveDefault=method=>!safetyDefault(method);

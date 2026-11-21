@@ -8,7 +8,7 @@ function rig({modelId=0x80000432,working=true,controlsOnly=false,restricted=fals
   const calls=[],settled=[],reference={},values=new Map([[0x400,3],[0x406,0x0c]]);let modeGuard=false;
   const ports={...protocol,createBulbControl,cameraAccessorySupport,process:{arch:'x64'},fs:{readFileSync:()=>Buffer.from('synthetic')},createHash:()=>({update:()=>({digest:()=>hash})}),fileVersion:async()=> '3.18.40.0',
     state:{connected:true,working,controlsOnly,saveTo:3,capabilities:{capture:true},sdkPath:'synthetic.dll'},camera:reference,restricted,sessionEpoch:1,accessoryEpoch:null,sessionEventsRegistered:!controlsOnly&&working,
-    accessorySupport:{bulb:false,flashPopup:false},bulb:createBulbControl(),flashControl:protocol.createFlashPopupControl(),bulbCaptureOperation:null,captureWait:null,
+    accessorySupport:{bulb:false,flashPopup:false},bulb:createBulbControl(),flashControl:protocol.createFlashPopupControl(),bulbCaptureOperation:null,captureWait:null,focusHold:{stop:async()=>{}},focusRestore:null,
     controls:{isBusy:()=>false,isServoHeld:()=>modeGuard},ensureWorking(){if(!ports.state.connected||!ports.state.working)throw Error('Not working');},
     sdk:{command:(_camera,id,param)=>{calls.push(['command',id,param]);return 0;},statusCommand:(_camera,id,param)=>{calls.push(['status',id,param]);return 0;}},
     PROPS:{shutter:0x406},get:id=>values.get(id),status:()=>ports.state,setDeliveryRoute:args=>calls.push(['route',args.route]),
@@ -116,7 +116,7 @@ test('Canon scene/movie/multi-shot noise reduction conditions reject popup avail
 function mainRig(){
   const calls=[],route={sessionId:'session-A',destination:'synthetic-A'};let settle,rejectStart;
   const channel={nativeEpoch:8,exited:false,consumer:{drain:async()=>calls.push(['drain'])}};
-  const context=vm.createContext({requireSession:()=>{},store:{settings:{captureFolder:'synthetic-A',autofocus:false}},workerState:channel,camera:{},bulbStarting:null,bulbStopping:null,
+  const context=vm.createContext({requireSession:()=>{},cameraIdle:()=>{},bulbInputOwner:null,store:{settings:{captureFolder:'synthetic-A',autofocus:false}},workerState:channel,camera:{},bulbStarting:null,bulbStopping:null,
     transferRoute:()=>({...route}),crypto:{randomUUID:()=> 'synthetic-capture'},t:key=>key,
     cameraCommand:(method,args)=>{calls.push([method,args]);return new Promise((resolve,reject)=>{settle=resolve;rejectStart=reject;});},call:async method=>{calls.push([method]);return {status:'idle',confirmation:'command-accepted'};},Object,Error
   },{codeGeneration:{strings:false,wasm:false}});
@@ -142,6 +142,19 @@ test('an early explicit BULB stop survives start rejection and retries cleanup o
 test('a rejected BULB start still cannot replay its pending stop into a different session',async()=>{
   const r=mainRig(),starting=r.context.api.startBulbFromControl(),failed=assert.rejects(starting),stopping=r.context.api.stopBulbFromControl(),stale=assert.rejects(stopping,error=>error.code==='OPERATION_STALE_SESSION');
   r.context.workerState.nativeEpoch++;r.fail();await failed;await stale;assert.equal(r.calls.length,1);
+});
+
+test('hold identity prevents a stale desktop or remote release from ending another BULB input',async()=>{
+  const r=mainRig(),starting=r.context.api.startBulbFromControl({inputId:'current'});r.settle();await starting;
+  assert.equal((await r.context.api.stopBulbFromControl({inputId:'old'})).released,false);assert.equal(r.calls.length,1);
+  await r.context.api.stopBulbFromControl({inputId:'current'});assert.deepEqual(r.calls.slice(1),[['bulbStop'],['drain']]);
+});
+
+test('a rejected competing BULB start cannot steal the input owner or stop an existing exposure',async()=>{
+  const r=mainRig(),starting=r.context.api.startBulbFromControl({inputId:'desktop'});r.settle();await starting;
+  r.context.cameraIdle=()=>{throw Error('Camera already exposing');};assert.throws(()=>r.context.api.startBulbFromControl({inputId:'remote'}),/exposing/);
+  assert.equal((await r.context.api.stopBulbFromControl({inputId:'remote'})).released,false);assert.equal(r.calls.length,1);
+  await r.context.api.stopBulbFromControl({inputId:'desktop'});assert.deepEqual(r.calls.slice(1),[['bulbStop'],['drain']]);
 });
 test('camera exposure callbacks are session-scoped and ignore queued time before accepted start',()=>{
   const received=[],context=vm.createContext({sessionEpoch:3,sessionEventsRegistered:true,bulbExposureSeconds:protocol.bulbExposureSeconds,state:{working:true,bulb:{status:'starting'}},bulb:{event:value=>received.push(value)},setImmediate:()=>{},camera:{},sdk:{command:()=>0}},{codeGeneration:{strings:false,wasm:false}});

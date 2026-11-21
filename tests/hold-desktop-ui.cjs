@@ -1,0 +1,59 @@
+'use strict';
+// Actual Electron + production renderer/main/preload with the fenced JS provider.
+// No Canon worker, Koffi, EDSDK, WIA or physical camera is admitted.
+const fs=require('node:fs'),path=require('node:path'),assert=require('node:assert/strict'),crypto=require('node:crypto');
+const {_electron}=require('playwright');
+const root=path.resolve(__dirname,'..'),base=path.join(root,'qa/integration-candidate'),read=file=>JSON.parse(fs.readFileSync(file,'utf8').replace(/^\uFEFF/,''));
+const admission=read(path.join(base,'runtime/admission.json')),binary=admission.binary.path;
+assert.equal(process.platform,'win32');assert.equal(process.arch,'x64');assert.ok(process.execArgv.includes('--no-addons'));assert.ok(!process.env.NODE_OPTIONS&&!process.env.NODE_PATH);
+assert.equal(crypto.createHash('sha256').update(fs.readFileSync(binary)).digest('hex'),admission.binary.sha256);
+assert.ok(path.resolve(binary).startsWith(path.join(base,'runtime')+path.sep));
+const screenshots=process.argv.includes('--screenshots');
+const onlyBurst=process.argv.includes('--only-burst');
+const demoArg=process.argv.indexOf('--demo-dir'),demoDir=demoArg>=0?path.resolve(process.argv[demoArg+1]):null;
+const fixture=fs.mkdtempSync(path.join(base,'fixtures/product-ui-'));
+for(const folder of ['user-data','user-data/previews','photos','other-photos','inputs','exports','artifacts','environment'])fs.mkdirSync(path.join(fixture,folder));
+const env={NODE_OPTIONS:'',NODE_PATH:'',PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD:'1',ELECTRON_SKIP_BINARY_DOWNLOAD:'1'};
+for(const key of ['SystemRoot','SYSTEMROOT','WINDIR','PROCESSOR_ARCHITECTURE','NUMBER_OF_PROCESSORS'])if(process.env[key])env[key]=process.env[key];
+for(const key of ['USERPROFILE','APPDATA','LOCALAPPDATA','TEMP','TMP']){env[key]=path.join(fixture,'environment',key);fs.mkdirSync(env[key]);}
+const seed=demoDir?fs.readFileSync(path.join(demoDir,'Study 08.jpg')):Buffer.from(require('./ic01/fixture-image.cjs').jpegBase64,'base64'),seedFile=path.join(fixture,'seed.jpg');fs.writeFileSync(seedFile,seed);
+const at='2026-11-21T12:00:00.000Z',sessions=[{id:'portrait',name:'Portrait study',captureFolder:path.join(fixture,'photos'),created:at,updated:at,presetQueue:[]},{id:'light',name:'Light and color',captureFolder:path.join(fixture,'other-photos'),created:at,updated:at,presetQueue:[]}];
+const photoFiles=Array.from({length:4},(_,index)=>{if(!demoDir)return seedFile;const target=path.join(fixture,'inputs','Study-'+(index+1)+'.jpg');fs.copyFileSync(path.join(demoDir,'Study 0'+(index*2+1)+'.jpg'),target);return target;});
+const photos=Array.from({length:4},(_,index)=>({id:'demo-'+index,name:'Study-'+(index+1)+'.jpg',path:photoFiles[index],thumbPath:photoFiles[index],previewPath:photoFiles[index],sessionId:index<3?'portrait':'light',rating:index===0?5:0,size:seed.length,created:at,date:at,metadata:{width:320,height:240},edits:{exposure:0,contrast:0,saturation:0,warmth:0,rotation:0,monochrome:false},cameraTransfer:index===0,transfer:index===0?{sessionAssociation:{status:'AMBIGUOUS',candidateSessionIds:['portrait','light']}}:undefined}));
+fs.writeFileSync(path.join(fixture,'user-data/library.json'),JSON.stringify({version:2,sessionId:'portrait',sessions,photos,presets:[{id:'demo',name:'Soft daylight',values:{iso:72,shutter:112,aperture:48}}],settings:{language:'en-US',theme:'light',design:'current',showSplashes:false,performanceMode:true,autoSelect:true,captureFolder:sessions[0].captureFolder,watchFolder:'',sdkDir:'',onboarding:{completed:true,step:'ready'}}}));
+fs.writeFileSync(path.join(fixture,'config.json'),JSON.stringify({extendedUiDeadline:true}));
+let app,page;const errors=[],checks=[];
+const command=(method,args)=>page.evaluate(({method,args})=>window.focal[method](args),{method,args});
+const driver=(method,...args)=>app.evaluate((_electron,{method,args})=>globalThis.__ic01[method](...args),{method,args});
+const configure=args=>driver('workerControl','configure',args);
+const catalog=read(path.join(root,'electron/i18n/locales/en-US.json')),label=key=>catalog[key];
+const button=key=>page.getByRole('button',{name:label(key),exact:true});
+const nav=key=>page.locator('.sidebar .nav-item').filter({hasText:label('desktop.'+key)}).click();
+const evidence=name=>page.screenshot({path:path.join(fixture,'artifacts',name+'.png')});
+async function servoMenu(){await page.locator('.af-mode-toggle').click();return page.getByRole('menuitemcheckbox',{name:label('desktop.servo_toggle'),exact:true});}
+async function toggleServo(){await(await servoMenu()).click();}
+async function assertServo(enabled){try{await page.waitForFunction(enabled=>{const control=document.querySelector('.af-control');return control?.dataset.servo===String(enabled)&&control.getAttribute('aria-busy')==='false';},enabled);}catch(error){fs.writeFileSync(path.join(fixture,'artifacts/servo-wait-state.json'),JSON.stringify({boot:await command('boot'),provider:await driver('workerControl','snapshot')},null,2));throw error;}assert.equal((await command('boot')).camera.servo.enabled,enabled);}
+async function waitBurstAfter(previous){await page.waitForFunction(async previous=>{const state=await window.focal.boot();return state.burst?.id!==previous&&['unconfirmed','completed'].includes(state.burst?.status)&&!state.captureState?.active&&!state.operationState?.busy;},previous);await page.waitForFunction(label=>{const node=document.querySelector('.native-burst-control button');return node&&!node.disabled&&node.getAttribute('aria-label')===label;},label('burstShutter.hold_for_continuous_shooting'));}
+async function waitFakeHeld(){for(let attempt=0;attempt<70;attempt++){const snapshot=await driver('workerControl','snapshot');if(snapshot.held)return snapshot;await page.waitForTimeout(20);}throw Error('Fake capture was not admitted into its held state.');}
+async function check(name,fn){if(onlyBurst&&!name.startsWith('burst shutter'))return;await fn();checks.push(name);console.log('PASS '+name);}
+async function waitCamera(predicate){await page.waitForFunction(predicate);}
+async function visibleCapture(){await nav('capture');await page.locator('.capture-workspace').waitFor();}
+async function run(){
+ app=await _electron.launch({executablePath:binary,args:[path.join(root,'tests/ic01/entry.cjs'),'--fixture='+fixture],cwd:root,env,chromiumSandbox:true,timeout:20000});
+ page=await app.firstWindow();page.setDefaultTimeout(6000);page.on('pageerror',error=>errors.push(error.message));await page.waitForSelector('.app-shell');await command('listCameras');await configure({productControls:true,liveView:true});await command('connect',{cameraId:'ic01-synthetic-camera'});await visibleCapture();
+ await command('property',{key:'shutter',value:12});
+ const bulb=page.getByRole('button',{name:label('desktop.bulb_hold'),exact:true});
+ const pointer=async(locator,name)=>locator.dispatchEvent(name,{pointerId:17,pointerType:'mouse',button:0,isPrimary:true,bubbles:true});
+ const idle=()=>page.waitForFunction(async()=>{const state=await window.focal.boot();return state.camera.bulb?.status==='idle'&&!state.operationState?.busy&&!document.querySelector('.bulb-control [data-held]')?.disabled;});
+ await check('BULB short hold uses one native start/end',async()=>{const before=(await driver('workerControl','snapshot')).productCalls;await pointer(bulb,'pointerdown');await page.waitForFunction(async()=>((await window.focal.boot()).camera.bulb?.status==='exposing'));await pointer(bulb,'pointerup');await idle();const after=(await driver('workerControl','snapshot')).productCalls;assert.equal(after.bulbStarts,before.bulbStarts+1);assert.equal(after.bulbStops,before.bulbStops+1);});
+ for(const reason of ['pointercancel','lostpointercapture','blur'])await check('BULB '+reason+' safely ends',async()=>{await pointer(bulb,'pointerdown');await page.waitForFunction(async()=>((await window.focal.boot()).camera.bulb?.status==='exposing'));reason==='blur'?await page.evaluate(()=>window.dispatchEvent(new Event('blur'))):await pointer(bulb,reason);await idle();});
+ await check('BULB keyboard repeats and outside pointer release do not toggle or duplicate',async()=>{const before=(await driver('workerControl','snapshot')).productCalls;await bulb.focus();await page.keyboard.down('Space');await page.keyboard.down('Space');await page.waitForFunction(async()=>((await window.focal.boot()).camera.bulb?.status==='exposing'));await page.keyboard.up('Space');await idle();await bulb.waitFor({state:'visible'});await page.waitForFunction(()=>!document.querySelector('.bulb-control [data-held]').disabled);await pointer(bulb,'pointerdown');await page.waitForFunction(async()=>((await window.focal.boot()).camera.bulb?.status==='exposing'));await page.evaluate(()=>window.dispatchEvent(new PointerEvent('pointerup',{pointerId:17,bubbles:true})));await idle();const after=(await driver('workerControl','snapshot')).productCalls;assert.equal(after.bulbStarts,before.bulbStarts+2);assert.equal(after.bulbStops,before.bulbStops+2);});
+ await command('property',{key:'shutter',value:112});await command('live',{enabled:true});
+ const near=page.getByRole('button',{name:label('desktop.nearer'),exact:true}),far=page.getByRole('button',{name:label('desktop.farther'),exact:true});
+ const focusIdle=()=>page.waitForFunction(async()=>!['starting','holding','stopping'].includes((await window.focal.boot()).camera.focusHold?.status));
+ for(const direction of ['near','far'])await check('focus '+direction+' hold repeats; release stops and preserves live stream',async()=>{const before=await driver('workerControl','snapshot'),button=direction==='near'?near:far;await pointer(button,'pointerdown');await page.waitForTimeout(720);await pointer(button,'pointerup');await focusIdle();const after=await driver('workerControl','snapshot');assert.ok(after.h1.focusCalls-before.h1.focusCalls>=2);assert.equal(after.h1.liveCalls,before.h1.liveCalls);const count=after.h1.focusCalls;await page.waitForTimeout(380);assert.equal((await driver('workerControl','snapshot')).h1.focusCalls,count);assert.equal((await command('boot')).camera.live,true);});
+ await check('focus with preview off acquires EVF once and restores once',async()=>{await command('live',{enabled:false});const before=await driver('workerControl','snapshot');await pointer(near,'pointerdown');await page.waitForTimeout(700);await pointer(near,'pointerup');await focusIdle();const after=await driver('workerControl','snapshot');assert.equal(after.h1.liveCalls-before.h1.liveCalls,2);assert.equal((await command('boot')).camera.live,false);});
+ await check('leaving the capture page releases an owned hold',async()=>{await command('property',{key:'shutter',value:12});await pointer(bulb,'pointerdown');await page.waitForFunction(async()=>((await window.focal.boot()).camera.bulb?.status==='exposing'));await nav('library');await idle();});
+ await check('application shutdown cleans an active BULB hold',async()=>{await visibleCapture();await pointer(bulb,'pointerdown');await page.waitForFunction(async()=>((await window.focal.boot()).camera.bulb?.status==='exposing'));await command('window',{action:'close'});});
+}
+(async()=>{try{await run();const result={status:'PASS',checks,errors,fixture,nativeCalls:0};assert.deepEqual(errors,[]);fs.writeFileSync(path.join(fixture,'artifacts','hold-result.json'),JSON.stringify(result,null,2));console.log(JSON.stringify(result));}catch(error){fs.writeFileSync(path.join(fixture,'artifacts','hold-failure.json'),JSON.stringify({error:error.stack,errors,checks},null,2));throw error;}finally{await app?.close().catch(()=>{});}})().catch(error=>{console.error(error);process.exitCode=1;});
