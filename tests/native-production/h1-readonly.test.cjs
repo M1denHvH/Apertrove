@@ -36,6 +36,45 @@ test('read-only connect never enters working SaveTo or capacity setup',()=>{
   assert.match(working,/sdk\.capacity/);
 });
 
+test('read-only connect opens one session without registering native event handlers',async()=>{
+  const source=section(worker,'async function connect(','\nfunction clearCard');
+  const calls=[];
+  const selected={id:'synthetic-camera',model:'EOS synthetic'};
+  const context=vm.createContext({
+    camera:null,sdk:{list(out){out[0]='list';return 0;},count(_ref,out){out[0]=1;return 0;},child(_ref,_index,out){out[0]='camera';return 0;},info(){return 0;},
+      objectHandler(){calls.push('objectHandler');return 0;},propertyHandler(){calls.push('propertyHandler');return 0;},stateHandler(){calls.push('stateHandler');return 0;}},
+    destination:'',sessionEpoch:0,evidence:{},state:{},restricted:false,teardownUncertain:false,captureWait:null,
+    controls:{isBusy:()=>false},transferProducer:{drain:async()=>{}},setDeliveryRoute:()=>{},load:()=>{},
+    listCameras:()=>[selected],selectCamera:()=>selected,describeCamera:()=>selected,
+    releaseRef:()=>true,check(code){assert.equal(code,0);},openCameraSession(){calls.push('open');},
+    textProperty:()=>selected.model,modelCapabilities:()=>({capture:true}),log:()=>{},
+    refresh(){calls.push('refresh');return {connected:true};},
+    prepareWorkingSession(){calls.push('prepareWorkingSession');},disconnect(){calls.push('disconnect');},
+    status:()=>({}),operationError:(code,message)=>Object.assign(Error(message),{code})
+  });
+  new vm.Script(source+'\nthis.connect=connect;').runInContext(context);
+  await context.connect({cameraId:selected.id,readOnly:true,folder:'synthetic'});
+  assert.deepEqual(calls,['open','refresh']);
+  assert.equal(context.state.working,false);
+  assert.equal(context.state.eventsRegistered,false);
+  assert.equal(context.state.saveTo,null);
+});
+
+test('working event registrations are idempotent and H1 reports them as untested',()=>{
+  const source=section(worker,'function registerWorkingEvents(','\nfunction prepareWorkingSession');
+  const calls=[];
+  const context=vm.createContext({sessionEventsRegistered:false,camera:'camera',callbacks:['object','property','state'],state:{},
+    sdk:Object.fromEntries(['objectHandler','propertyHandler','stateHandler'].map(name=>[name,()=>{calls.push(name);return 0;}])),check:code=>assert.equal(code,0)});
+  new vm.Script(source+'\nthis.registerWorkingEvents=registerWorkingEvents;').runInContext(context);
+  context.registerWorkingEvents();context.registerWorkingEvents();
+  assert.deepEqual(calls,['objectHandler','propertyHandler','stateHandler']);
+  assert.equal(context.state.eventsRegistered,true);
+  const {capabilityReport}=require('../../electron/camera-capabilities.cjs');
+  const rows=capabilityReport({state:{properties:{},eventsRegistered:false},read:()=>({code:0x50}),storage:{volumes:[],unverifiedLayout:true},exports:{},restricted:false});
+  assert.equal(rows.find(row=>row.id==='events').status,'unknown');
+  assert.match(rows.find(row=>row.id==='transfer').detail,/Диагностика не принимает файлы/);
+});
+
 test('diagnoseCamera is a read-only report path',()=>{
   const source=section(worker,'async function diagnoseCamera(','\nfunction prepareWorkingSession');
   assert.match(source,/refresh\(\)/);

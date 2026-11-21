@@ -23,7 +23,7 @@ const generation=process.argv.find(value=>value.startsWith('--apertrove-generati
 if(typeof generation!=='string'||!/^[A-Za-z0-9._:-]{1,96}$/.test(generation)||!path.isAbsolute(process.env.APERTROVE_RECOVERY_DESTINATION||''))throw Error('Explicit worker generation and recovery destination required.');
 const send = value => {const message=value.type==='operation'?value:{...value,generation,sessionEpoch};return parent ? parent.postMessage(message) : process.send?.(message);};
 let sdk, library, com, dllDirectory, bindings, camera=null, initialized=false, live=false, callbacks=[], timer, cardRefs=new Map(), captureWait=null, destination='', shuttingDown=false;
-let sessionEpoch=0, sessionOpened=false, restricted=false, evidence={}, environmentChecks=[], evfRestore=null;
+let sessionEpoch=0, sessionOpened=false, sessionEventsRegistered=false, restricted=false, evidence={}, environmentChecks=[], evfRestore=null;
 let nativeStarted=false,producersFenced=false,photoSequence=0,teardownUncertain=false,currentOperation=null;
 const initializationGate=createSdkInitializationGate();
 const quarantinedNativeRefs=new Set();
@@ -267,7 +267,17 @@ async function diagnoseCamera(){
     lens:state.equipment.lensName,mode:state.mode,availableShots:state.equipment.availableShots,sdkVersion,sdkPath:file,working:state.working,
     saveTo:state.saveTo,storage:storage.volumes,optional:sdk.exports,rows};
 }
+function registerWorkingEvents(){
+  if(sessionEventsRegistered)return;
+  // Mark before the first registration so partial failure still unregisters on close.
+  sessionEventsRegistered=true;
+  check(sdk.objectHandler(camera,0x200,callbacks[0],null),'События снимков');
+  check(sdk.propertyHandler(camera,0x100,callbacks[1],null),'События параметров');
+  check(sdk.stateHandler(camera,0x300,callbacks[2],null),'События камеры');
+  state.eventsRegistered=true;
+}
 function prepareWorkingSession(preferred){
+  registerWorkingEvents();
   const existing=get(0xb);
   state.saveTo=null;
   if(!restricted){
@@ -308,12 +318,9 @@ async function connect({sdkDir,folder,cameraId,readOnly=false,savePreference,rec
     }
     if(!camera)throw Error('Список камер изменился. Повторите поиск.');
     openCameraSession();sessionEpoch++;evidence={};setDeliveryRoute({route,folder});
-    check(sdk.objectHandler(camera,0x200,callbacks[0],null),'События снимков');
-    check(sdk.propertyHandler(camera,0x100,callbacks[1],null),'События параметров');
-    check(sdk.stateHandler(camera,0x300,callbacks[2],null),'События камеры');
     state.description=selected.model;state.model=textProperty(0x2)||selected.model;state.connectedAt=Date.now();state.cameraId=selected.id;state.connected=true;state.error=null;
     restricted=!modelCapabilities(selected.model,true).capture;
-    state.working=false;state.saveTo=null;
+    state.working=false;state.saveTo=null;state.eventsRegistered=false;
     state.capabilities={capture:false,liveView:false,focus:false,manualFocus:false,import:false,reason:'Открыта сессия диагностики.'};
     log('success',`${state.model}: USB-подключение установлено.`);return readOnly?refresh():prepareWorkingSession(savePreference);
   } catch(e) {await transferProducer.drain();disconnect();state.error=e.message;status();throw e;}
@@ -336,13 +343,13 @@ function disconnect() {
     try {restoreLiveView();}catch{}
     releaseEvf();clearCard();
     if(sessionOpened){
-      for(const [method,event] of [['objectHandler',0x200],['propertyHandler',0x100],['stateHandler',0x300]])try{if(observed({objectHandler:'EdsSetObjectEventHandler',propertyHandler:'EdsSetPropertyEventHandler',stateHandler:'EdsSetCameraStateEventHandler'}[method],'handlers',()=>sdk[method](camera,event,null,null))!==0)teardownUncertain=true;}catch{teardownUncertain=true;}
+      if(sessionEventsRegistered)for(const [method,event] of [['objectHandler',0x200],['propertyHandler',0x100],['stateHandler',0x300]])try{if(observed({objectHandler:'EdsSetObjectEventHandler',propertyHandler:'EdsSetPropertyEventHandler',stateHandler:'EdsSetCameraStateEventHandler'}[method],'handlers',()=>sdk[method](camera,event,null,null))!==0)teardownUncertain=true;}catch{teardownUncertain=true;}
       try{if(observed('EdsCloseSession','session-close',()=>sdk.close(camera))!==0)teardownUncertain=true;}catch{teardownUncertain=true;}
     }
     // Unknown close/unregister results do not justify shortening native lifetime.
     if(!teardownUncertain){if(releaseRef(camera,'camera-release'))camera=null;}
   }
-  sessionOpened=false;restricted=false;evidence={};focusSampleAt=0;focusSample={sequence:focusSample.sequence,status:'unknown'};
+  sessionOpened=false;sessionEventsRegistered=false;state.eventsRegistered=false;restricted=false;evidence={};focusSampleAt=0;focusSample={sequence:focusSample.sequence,status:'unknown'};
   transfers.setRoute({sessionEpoch,sessionId:null,destination:''});
   live=false;Object.assign(state,{focusInfo:null,lastFocused:null,autofocus:null,connected:false,working:false,properties:{},liveStats:null,saveTo:null,capabilities:null,description:null,model:null,battery:null,equipment:null,cameraId:null,error:null,nativeOutcome:teardownUncertain?'UNKNOWN':null});return status();
 }

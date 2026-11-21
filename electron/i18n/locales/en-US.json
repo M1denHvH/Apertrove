@@ -1187,6 +1187,8 @@
   "legacy.cameraCapabilities.events_and_other_features": "Events and other features",
   "legacy.cameraCapabilities.file_property_and_state_events": "File, property and state events",
   "legacy.cameraCapabilities.the_sdk_registered_all_three_event_handlers": "The SDK registered all three event handlers.",
+  "legacy.cameraCapabilities.diagnostics_do_not_receive_files": "Checked in a working connection. Diagnostics do not receive files.",
+  "legacy.cameraCapabilities.events_checked_in_working_connection": "Events are checked in a working connection.",
   "legacy.cameraCapabilities.video_recording_controls": "Video recording controls",
   "legacy.cameraCapabilities.availability_depends_on_the_camera_sdk_version_and": "Availability depends on the camera, SDK version and movie mode. Recording was not started.",
   "legacy.cameraControl.image_quality": "Image quality",

@@ -65,8 +65,8 @@ function capabilityReport({ state, read, storage, exports, restricted, evidence 
   const destination=read(0xb);
   const target=destination.buffer?.length===4?destination.buffer.readUInt32LE():null;
   probe(storageGroup, 'saveTo', 'Место сохранения', destination, ({1:'Карта памяти',2:'Компьютер',3:'Карта и компьютер'})[target]||'Чтение текущего назначения');
-  add(storageGroup, 'transfer', 'Передача снимка на ПК', evidence.capture ? 'ready' : 'unknown', 'Обработчик передачи зарегистрирован; результат подтверждает полученный файл.');
-  add('События и дополнительные функции', 'events', 'События файлов, параметров и состояния', 'ready', 'SDK принял регистрацию трёх обработчиков.');
+  add(storageGroup, 'transfer', 'Передача снимка на ПК', evidence.capture ? 'ready' : 'unknown', state.eventsRegistered ? 'Обработчик передачи зарегистрирован; результат подтверждает полученный файл.' : 'Проверяется при рабочем подключении. Диагностика не принимает файлы.');
+  add('События и дополнительные функции', 'events', 'События файлов, параметров и состояния', state.eventsRegistered ? 'ready' : 'unknown', state.eventsRegistered ? 'SDK принял регистрацию трёх обработчиков.' : 'События проверяются при рабочем подключении.');
   add('События и дополнительные функции', 'video', 'Управление видеозаписью', 'unimplemented', 'Доступность зависит от модели, версии SDK и видеорежима. Запись не запускалась.');
   return rows;
 }

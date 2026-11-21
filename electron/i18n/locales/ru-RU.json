@@ -1187,6 +1187,8 @@
   "legacy.cameraCapabilities.events_and_other_features": "События и дополнительные функции",
   "legacy.cameraCapabilities.file_property_and_state_events": "События файлов, параметров и состояния",
   "legacy.cameraCapabilities.the_sdk_registered_all_three_event_handlers": "SDK принял регистрацию трёх обработчиков.",
+  "legacy.cameraCapabilities.diagnostics_do_not_receive_files": "Проверяется при рабочем подключении. Диагностика не принимает файлы.",
+  "legacy.cameraCapabilities.events_checked_in_working_connection": "События проверяются при рабочем подключении.",
   "legacy.cameraCapabilities.video_recording_controls": "Управление видеозаписью",
   "legacy.cameraCapabilities.availability_depends_on_the_camera_sdk_version_and": "Доступность зависит от модели, версии SDK и видеорежима. Запись не запускалась.",
   "legacy.cameraControl.image_quality": "Формат снимка",
