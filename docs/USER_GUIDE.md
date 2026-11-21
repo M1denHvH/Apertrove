@@ -100,6 +100,16 @@ Read deletion confirmations: removing a Library entry and moving eligible origin
 
 ![Demo photographs in Library](screenshots/library.png)
 
+### Camera Card: browse and copy from the camera
+
+In **Library**, switch from **Local** to **Camera Card**. Open a card and its folders to see the files still stored in the camera. The listing uses Canon's camera connection; the card does not need to appear as a Windows drive. Large folders load in pages, without downloading all originals.
+
+Select files, then choose **Export to folder** to copy them to a destination on the PC. **Import to Library** also registers the copied files in the local collection; it does not automatically attach them to the current photo session. Exporting alone leaves the local Library unchanged. Files on the card remain a separate source.
+
+The transfer shows progress and supports **Cancel**. Completed files are kept; a failed or cancelled file can be selected again. Existing names receive a numeric suffix instead of being overwritten. Refresh a folder to see new camera files; refreshing clears the previous selection.
+
+Previews appear when the camera supplies a usable JPEG thumbnail, including for some RAW files. Unsupported RAW/video previews use a file placeholder and metadata. Capture dates are omitted when their camera timestamp format is unverified. Initial Camera Card support is limited to the qualified runtime described in [Camera support](COMPATIBILITY.md); other setups show an unavailable state. This source adds browsing and export, with physical storage compatibility still requiring testing. Formatting and deleting files on the camera are not offered.
+
 ## 6. Review in Shot Inspector
 
 Choose **Open Shot Inspector** in Capture or Library for a separate window that can sit on another monitor. It follows registered camera arrivals. Pin a frame to stop it changing while you inspect detail.

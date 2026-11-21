@@ -24,10 +24,13 @@ A greyed control can mean the feature is unsupported, unavailable in the current
 | Manual preview rotation | Available in Live View; changes only the displayed preview. |
 | Shutter and camera-file transfer | Implemented, with broader real-camera testing still needed. A simulated capture cannot certify physical behavior. |
 | Local Library, sessions and Lighting Studio | No camera or Canon runtime required. |
+| Camera Card browsing and export | A qualified runtime, accessible camera storage and supported directory/download operations. Preview availability varies by file and camera. |
 
 Development builds include **built-in flash pop-up** and **BULB start/end** controls for verified runtime and camera-capability combinations. Initial native support is limited to the verified x64 Canon runtime with Windows file version **3.18.40.0** and recognized camera capabilities. A matching version number alone is not a support guarantee; other or unrecognized combinations retain unavailable controls.
 
 Broader physical compatibility still needs hardware testing. Flash mode and firing settings do not establish mechanical pop-up; an accepted raise command alone does not prove the position of the flash. On the tested setup, flash pop-up has been confirmed with **Live View both off and on** in the current development build, without an automatic preview stop/restart. BULB requires an offered compatible route and the camera to be in BULB mode. Exposure time is shown only from camera messages, and an unknown stop is not treated as a completed exposure.
+
+Camera Card initially uses the same exact qualified x64 runtime identity for storage structures. It lists volumes and folders, retrieves available JPEG thumbnails, and exports originals with cancellation. It supports explicit import into the local Library without automatically choosing a photo session. Other runtime identities stay unavailable. The new storage paths have static ABI and fake-provider verification; physical card access, large files and RAW/video thumbnails need separate camera testing. Camera file timestamps are not displayed as dates until their format is qualified. Card formatting and deletion are excluded.
 
 ## Testing status
 
