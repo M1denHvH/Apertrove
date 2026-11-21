@@ -37,8 +37,8 @@ function Thumbnail({item,image,onVisible,onOpen,disabled,active,epoch}){
 }
 
 export default function CameraCard({camera,disabled=false,onConnect,onNotice,api=window.focal}){
-  const [listing,setListing]=useState(null),[loading,setLoading]=useState(false),[error,setError]=useState(''),[selected,setSelected]=useState([]),[images,setImages]=useState({}),[preview,setPreview]=useState(null),[exporting,setExporting]=useState(false),[progress,setProgress]=useState(null),[receipt,setReceipt]=useState(null),[thumbnailIdle,setThumbnailIdle]=useState(0);
-  const generation=useRef(0),alive=useRef(true),current=useRef(null),request=useRef(false),pendingNavigation=useRef(null),exportOwner=useRef(null),thumbnailQueue=useRef([]),thumbnailSeen=useRef(new Set()),thumbnailRunning=useRef(false),thumbnailLease=useRef(false),thumbnailSettled=useRef(Promise.resolve());
+  const [listing,setListing]=useState(null),[loading,setLoading]=useState(false),[error,setError]=useState(''),[selected,setSelected]=useState([]),[images,setImages]=useState({}),[preview,setPreview]=useState(null),[exporting,setExporting]=useState(false),[progress,setProgress]=useState(null),[receipt,setReceipt]=useState(null);
+  const generation=useRef(0),alive=useRef(true),current=useRef(null),request=useRef(false),pendingNavigation=useRef(null),exportOwner=useRef(null),thumbnailQueue=useRef([]),thumbnailSeen=useRef(new Set()),thumbnailRunning=useRef(false),thumbnailSettled=useRef(Promise.resolve());
   current.current={camera,disabled,listing};
   const connected=camera.connected===true,canRead=connected&&camera.working!==false&&camera.controlsOnly!==true;
   const files=listing?.items?.filter(item=>item.kind==='file')||[],fileIds=files.map(item=>item.id),selectedSet=new Set(selected);
@@ -51,11 +51,11 @@ export default function CameraCard({camera,disabled=false,onConnect,onNotice,api
         const {id,epoch}=thumbnailQueue.current.shift();
         if(epoch!==generation.current)continue;
         try{
-          thumbnailLease.current=true;const operation=api.cardThumbnail({id});thumbnailSettled.current=operation.catch(()=>{});const result=await operation;
+          const operation=api.cardThumbnail({id});thumbnailSettled.current=operation.catch(()=>{});const result=await operation;
           if(alive.current&&epoch===generation.current)setImages(old=>thumbnailCache(old,id,imageSource(result)));
         }catch{/* A missing thumbnail leaves a file icon; listing and export stay usable. */}
       }
-    }finally{thumbnailRunning.current=false;if(alive.current)setThumbnailIdle(value=>value+1);}
+    }finally{thumbnailRunning.current=false;}
   },[api]);
   const queueThumbnail=useCallback(id=>{
     if(thumbnailSeen.current.has(id))return;
@@ -63,7 +63,7 @@ export default function CameraCard({camera,disabled=false,onConnect,onNotice,api
   },[drainThumbnails]);
 
   const load=useCallback(async(parentId=null,{append=false,refresh=false}={})=>{
-    if(exportOwner.current||current.current.disabled&&!thumbnailLease.current||!current.current.camera.connected)return;
+    if(exportOwner.current||current.current.disabled||!current.current.camera.connected)return;
     if(request.current){pendingNavigation.current={parentId,append,refresh};return;}
     const epoch=++generation.current;request.current=true;setLoading(true);setError('');setPreview(null);
     thumbnailQueue.current=[];thumbnailSeen.current.clear();
@@ -97,7 +97,6 @@ export default function CameraCard({camera,disabled=false,onConnect,onNotice,api
       if(!listing&&!error)void load();else void drainThumbnails();
     }
   },[disabled,canRead,listing,error,load,drainThumbnails]);
-  useEffect(()=>{if(!disabled&&!thumbnailRunning.current)thumbnailLease.current=false;},[disabled,thumbnailIdle]);
   useEffect(()=>api.on(({type,data})=>{
     if(type!=='cardExportProgress'||!exportOwner.current)return;
     const owner=exportOwner.current;if(owner.operationId&&data.operationId!==owner.operationId)return;
@@ -128,9 +127,7 @@ export default function CameraCard({camera,disabled=false,onConnect,onNotice,api
   const open=item=>item.kind==='file'?setPreview(item):void load(item.id);
   const navigate=parentId=>{if(!loading&&!exporting)void load(parentId);};
   const allSelected=fileIds.length>0&&fileIds.every(id=>selectedSet.has(id));
-  // Our background thumbnail read has its own serialized owner. It must not
-  // disable pointer-up/click between events; navigation/export await that owner.
-  const isLocked=disabled&&!thumbnailLease.current||loading||exporting;
+  const isLocked=disabled||loading||exporting;
   const incomplete=receipt&&receipt.status!=='completed'&&(receipt.files?.length||receipt.failures?.length||receipt.remainingIds?.length);
   const byteProgress=Number.isFinite(progress?.totalBytes)&&progress.totalBytes>0,progressMax=byteProgress?progress.totalBytes:progress?.total||1;
   const progressValue=byteProgress?Math.min(progressMax,(progress.bytes||0)+(progress.currentName?progress.currentBytes||0:0)):progress?.done||0;
