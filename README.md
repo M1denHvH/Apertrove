@@ -98,7 +98,7 @@ Windows x64 is the current target. Canon DLLs and proprietary headers are **not 
 
 The project is still gathering camera testing reports. Earlier hardware checks cover a limited set of camera reads, exposure controls and Live View. Newer Servo, orientation and capture workflows also have automated fake-provider coverage, which cannot prove optical focus, physical shutter behavior or compatibility with every camera.
 
-Development builds include built-in flash pop-up and BULB controls for verified camera/runtime combinations. Availability varies, and physical compatibility still needs hardware testing. Other connections keep those controls unavailable. See [camera support and limits](docs/COMPATIBILITY.md) before planning a shoot around them.
+Development builds include built-in flash pop-up and BULB controls for verified camera/runtime combinations. On the tested setup, flash pop-up works with Live View off; a request with Live View on returns an error and remains under investigation. Limited hardware checks also cover a three-second BULB exposure and brief shutter inputs with Servo off and on. These results do not establish support for every camera. See [camera support and testing notes](docs/COMPATIBILITY.md).
 
 ## Help us test more cameras
 

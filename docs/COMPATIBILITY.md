@@ -27,11 +27,17 @@ A greyed control can mean the feature is unsupported, unavailable in the current
 
 Development builds include **built-in flash pop-up** and **BULB start/end** controls for verified runtime and camera-capability combinations. Initial native support is limited to the verified x64 Canon runtime with Windows file version **3.18.40.0** and recognized camera capabilities. A matching version number alone is not a support guarantee; other or unrecognized combinations retain unavailable controls.
 
-Physical compatibility of these new routes still needs hardware testing. Flash mode and firing settings do not establish mechanical pop-up; an accepted raise command does not prove the position of the flash. BULB requires an offered compatible route and the camera to be in BULB mode. Exposure time is shown only from camera messages, and an unknown stop is not treated as a completed exposure.
+Broader physical compatibility still needs hardware testing. Flash mode and firing settings do not establish mechanical pop-up; an accepted raise command alone does not prove the position of the flash. On the tested setup, use flash pop-up with **Live View off**. The Live View-on request currently returns an error and is under investigation. BULB requires an offered compatible route and the camera to be in BULB mode. Exposure time is shown only from camera messages, and an unknown stop is not treated as a completed exposure.
 
 ## Testing status
 
-Earlier hardware observations cover a limited set of camera state reads, exposure changes with restoration, Live View and its software histogram. Those observations do not certify the full EOS range. Newer Servo, orientation, shutter, flash and BULB workflows also have automated fake-provider tests; those results do not establish physical behavior on a particular setup.
+Earlier hardware observations cover a limited set of camera state reads, exposure changes with restoration, Live View and its software histogram. More recent authorized checks used **Canon EOS 2000D, firmware 1.3, with the verified x64 Canon runtime 3.18.40.0**:
+
+- Single capture and a brief 120 ms continuous-drive hold were each checked with AI Servo off and on. Each of the four inputs delivered one file, without the hold watchdog firing.
+- One three-second BULB exposure reported camera elapsed time from 0 through 3 seconds, delivered a JPEG with EXIF ExposureTime of 3 seconds, and restored the previous shutter-speed setting.
+- The user confirmed that Apertrove's flash button physically raises the built-in flash with Live View off. With Live View on, the request returns an error; this scenario remains under investigation. The camera's own flash button also works with the Apertrove session open and Live View off.
+
+These are limited results for one setup, not certification of other bodies, firmware, modes or all exposure lengths. Automated fake-provider tests additionally cover application paths and errors; they do not establish physical behavior on another setup.
 
 You can help by reporting your camera model, firmware, lens, Apertrove version, runtime version and the exact workflow. A connection report is useful even if you do not know the runtime version. [Share a result or problem](https://github.com/M1denHvH/Apertrove/issues/new?template=bug_report.yml). Do not include serial numbers or Canon binaries.
 
