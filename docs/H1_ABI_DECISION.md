@@ -2,6 +2,8 @@
 
 **Решение: BLOCKED. H1 остаётся NOT RUN и не готов к отдельному разрешению на работу с камерой.** Это решение о доказанности native ABI, не о правах использования SDK.
 
+Обновление 21 ноября 2026: отдельный N2 lifecycle experiment завершён с SOURCE_ZERO_CYCLE; [результат и его границы](N2_EXECUTION_PLAN.md). Он не квалифицирует перечисленные ниже H1 output layouts. Таблица сохраняет состояние целевого H1 review до аппаратной квалификации.
+
 ## Статус ABI
 
 | Тип / группа | Статус | Основание |
@@ -19,7 +21,7 @@
 
 ## H1 и H1A
 
-H1 **BLOCKED** до получения доступных официальных declarations и подтверждения их применимости к runtime либо другого vendor-backed ABI evidence. Вызов H1 сейчас может передать неподтверждённый output layout в `EdsGetDeviceInfo` или `EdsGetPropertyDesc`.
+H1 **BLOCKED** до надёжного технического обоснования output layouts и используемых scalar/enum/ref/callback declarations. Допустимо сопоставление Canon Reference, маркированных исторических headers, известных type declarations, Windows x64 ABI и Koffi bindings с явным уровнем уверенности; официальное отображение DLL SHA → SDK package не является универсальным обязательным доказательством. Вызов H1 сейчас может передать недостаточно обоснованный output layout в `EdsGetDeviceInfo` или `EdsGetPropertyDesc`.
 
 H1A не имеет безопасного допуска сейчас. Отказ от DeviceInfo/PropDesc оставляет только список/счётчик камер, но `EdsGetCameraList`, `EdsGetChildCount`, `EdsGetChildAtIndex`, owned refs, output pointers и release всё равно требуют совместимого pointer/calling/ownership ABI. Одного количества недостаточно, чтобы выбрать EOS 2000D при нескольких устройствах. Поэтому это только возможный будущий, отдельно проверяемый эксперимент после qualification этих базовых функций; запуск не разрешён.
 
@@ -29,4 +31,4 @@ H1A не имеет безопасного допуска сейчас. Отка
 
 Ранее сохранённые IC01 H1/histogram отчёты содержали `sourceCommit: 0284c546…`, а runner лишь переписывал launcher environment и не сверял его с Git HEAD. Проверка 73 tracked entries из старых `sourceHashes` совпала с содержимым `81beeddb…`; три файла отличаются только CRLF/LF нормализацией. Остальные 60 хэшей относятся к тогдашнему generated `dist`. Это подтверждает содержимое источников лучше, чем старое поле, но не устанавливает, почему launcher передал родительский commit `0284c54…`; старое поле само по себе не является доказательством tested HEAD или baseline. Новый узкий IC01 runner пишет `testedHead`, требует равенство launcher SHA с `git rev-parse HEAD`, отдельно хранит optional `baselineCommit`, а `sourceHashes` перечисляет фактически прочитанные файлы и проверяет их неизменность до конца прогона.
 
-N2 technical admission остаётся READY по ранее принятому решению; настоящее native execution — NOT RUN; применимые Canon terms остаются `APPLICABLE_TERMS_UNRESOLVED`. Юридический статус здесь повторно не исследуется. Следующий короткий технический шаг: получить официальный matching package/declarations и подтвердить связь с runtime, выполнить только compile-time type/layout probe, затем пересмотреть H1/H1A. Реальное исполнение — только после отдельного допуска и разрешения условий Canon; ни DLL, ни камера в этой работе не запускались.
+N2 уже завершён; повторять его для ещё одного PASS не требуется. Следующий H1 шаг — адресное сопоставление declarations и compile-time type/layout probe без DLL load при наличии headers. Применимые условия локального использования учитываются отдельно от технической квалификации; подтверждение пользователя не является доказательством Canon grant. Юридический статус здесь повторно не исследуется. Во время исходного ABI review DLL и камера не запускались; последующий N2 result описан отдельно.

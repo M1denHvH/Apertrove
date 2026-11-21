@@ -2,10 +2,11 @@
 
 | Symptom | What to check |
 | --- | --- |
-| EDSDK cannot be found | Install official Canon software for your model, then re-run the Canon components check. If the x64 SDK is elsewhere, select the directory containing `EDSDK.dll`. |
-| An SDK is found but initialization fails | Read the diagnostics for architecture, load or export errors. Select an intact official x64 installation with its matching dependencies. Record the reported library version and SDK code if you ask for help. |
+| EDSDK cannot be found | Install official Canon software for your model and region that supplies compatible x64 components, or use the official SDK. EOS Utility and Picture Style Editor are potential sources depending on the release. Select the installation folder containing `EDSDK.dll`; do not download standalone DLLs from unofficial sites. |
+| An SDK is found but initialization fails | Distinguish an x86/x64 mismatch, a dependency or load failure, an absent export, and an SDK initialization error in diagnostics. Use the intact official installation with its matching dependencies. Record the library version and raw code; a successful lifecycle test does not establish camera-feature compatibility. |
 | Camera does not appear | Turn it on, use a USB data cable and try a direct USB port. Close EOS Utility and any other tethering app, then use **Find cameras** again. |
-| Camera is reported busy | Wait for in-camera writes and transfers. Exit EOS Utility and retry the connection. |
+| Camera is reported busy | Wait for in-camera writes and transfers. Close EOS Utility, Picture Style Editor and other camera hosts. If installed Canon Webcam Utility keeps the connection, inspect its background service before retrying; Apertrove does not stop services or change Windows settings automatically. |
+| A previous operation or shutdown is UNKNOWN | Preserve diagnostics and the output files already received. Do not repeat the command to manufacture a success. Review the exact process cleanup and camera state before starting another attempt. |
 | Live View or a setting is disabled | Check whether the camera advertises it in the current dial mode. For lens drive and autofocus, confirm the lens is switched to AF. Stop an active burst, transfer or interval run before trying again. |
 | No shot arrives in the library | Open a photo session, check its writable folder and choose a destination that includes the PC. If the camera saves only to the card, use card import or local import. A failed autofocus attempt may also prevent release. |
 | Web Remote cannot be opened | Use the QR link from the active server, put both devices on the same trusted LAN, and confirm Windows Firewall allows the app on that private network. Guest Wi-Fi client isolation can block the connection. |

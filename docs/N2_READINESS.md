@@ -1,6 +1,8 @@
 # N2 admission closure
 
-Статус milestone: BLOCKED_VENDOR_OR_LICENSE / APPLICABLE_TERMS_UNRESOLVED. Технические pre-execution gates reviewed, предыдущий dry-run ready:true. По уточнению пользователя PSE установлен из официального дистрибутива Canon, но источник/регион, принятая EULA и права на сторонний init-only experiment не подтверждены. Это не вывод о разрешении или запрете. Реальное native execution — NOT RUN, отдельного разрешения нет. Предыдущие N1/N1.5 evidence сохранены; этот этап использует qa/native-n2-admission/.
+Актуальный результат 21 ноября 2026: **N2 DONE — SOURCE_ZERO_CYCLE, exit 0.** После отдельного разрешения пользователя выполнен один init/terminate cycle с закреплённой PSE x64 DLL: raw init=0, terminate=0, unloaded=true, comBalanced=true; естественный exit и пустое Job tree подтверждены. Камера не подключалась. В stderr сохранена nonfatal stdout-sync diagnostic; исходный источник не установлен. Module sampling не захватил краткую загрузку Canon DLL и не доказывает полную dynamic closure. Приватные manifest/logs остаются вне Git. [Протокол и границы результата](N2_EXECUTION_PLAN.md).
+
+Неизвестные структуры H1 не входят в двухфункциональный N2. Подтверждение пользователем применимых условий локального использования учитывается отдельно от технической совместимости и не является доказательством Canon grant; универсальное требование отдельного письменного разрешения Canon не вводится. Ни повтор N2, ни аппаратные этапы этим документом не разрешены. Далее сохранён исторический pre-execution ledger: его NOT_RUN и старые manifest identifiers относятся к состоянию до завершённого эксперимента, а не к актуальному N2 результату.
 
 ## Точная граница
 

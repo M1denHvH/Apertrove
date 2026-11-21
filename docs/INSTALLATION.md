@@ -18,13 +18,17 @@ Windows x64 is required. The release was checked on Windows 10 x64. Windows 11 x
 
 ## 3. Set up Canon components
 
-For camera control, obtain [EOS Utility](https://www.usa.canon.com/support/eos-utilities) from Canon for your exact camera and region, or obtain the x64 SDK through the [Canon developer program](https://www.usa.canon.com/support/sdk). Availability and terms vary. Apertrove checks standard Canon installation directories, including `Canon\EOS Utility\EU3` under Program Files. The wizard also accepts the directory containing the compatible `EDSDK.dll`. A 32-bit DLL cannot load in the x64 app.
+For camera control, install official Canon software for your exact model and region that supplies compatible x64 EDSDK components, or obtain the SDK through the [Canon developer program](https://www.usa.canon.com/support/sdk). [EOS Utility](https://www.usa.canon.com/support/eos-utilities) and Picture Style Editor are potential sources; availability, architecture and terms vary by release. Apertrove does not bundle or download Canon DLLs or proprietary headers.
+
+Apertrove checks standard Canon installation directories, including EOS Utility and Picture Style Editor under Program Files. You can also select the folder containing a compatible `EDSDK.dll`. Keep that official installation and its dependencies intact; do not copy a DLL from another installation or an unofficial download site. A 32-bit DLL cannot load in the x64 app.
+
+The controlled N2 test on 21 November 2026 verified one PSE x64 runtime, file version 3.18.40.0, through a single initialize/terminate cycle with no camera connected. This is not a claim that all PSE versions or camera operations work. The exact tested identity and remaining camera checks are listed in [requirements](REQUIREMENTS.md).
 
 Use the diagnostic screen to confirm that the library loads. If the SDK is missing or incompatible, you can skip camera setup and use sessions, local import, and Lighting Studio.
 
 ## 4. Connect and take a test frame
 
-1. Exit EOS Utility, including its tray launcher if it opens a connection.
+1. Exit EOS Utility, Picture Style Editor and any other camera host, including tray launchers that open a connection. A Canon Webcam Utility background service can also hold the camera; see [troubleshooting](TROUBLESHOOTING.md).
 2. Turn on the camera and connect it directly with a USB data cable.
 3. Choose **Find cameras** in Apertrove and select the detected camera.
 4. Create a session, pick a writable output folder, and select a destination that includes the computer if you want incoming files in Apertrove.
