@@ -2,7 +2,7 @@
 
 [Install and connect](INSTALLATION.md) · [Camera support](COMPATIBILITY.md) · [Руководство на русском](STUDIO.ru.md)
 
-A typical shoot starts in **Sessions**, moves to **Capture**, and finishes with review in **Library**. You can also import existing photographs without connecting a camera. This guide follows the current development source; the published 0.10.3 download is an earlier snapshot.
+A typical shoot starts in **Sessions**, moves to **Capture**, and finishes with review in **Library**. You can also import existing photographs without connecting a camera. This guide describes the published **0.10.4** release.
 
 Screenshots show the real application with a labelled demo camera and sample artwork. They do not establish physical-camera compatibility.
 
@@ -68,9 +68,9 @@ In a supported continuous drive mode, hold the shutter button to shoot a series 
 
 Wait for the save operation and inspect the received file. Live View and an AF preview are not saved photographs. A photograph counts as received after its original is saved and its Library entry is committed, including when it has no photo session. An uncertain shutter acknowledgement alone does not make that received photograph unsuccessful. If no file can be confirmed or registration fails, the app keeps the corresponding warning or error; check the camera, card and output folder before repeating the shot.
 
-### Flash and BULB in development builds
+### Flash and BULB
 
-These controls become available only for verified camera/runtime combinations. [Camera support](COMPATIBILITY.md#testing-status) records the limited physical checks; other combinations still need testing and unrecognized combinations keep unavailable controls.
+These controls become available only for supported camera/runtime combinations. Availability can vary by camera model, firmware and installed Canon runtime; unsupported combinations keep the controls unavailable.
 
 Use **Raise flash** when offered for a camera with a built-in flash. Check the camera after the request: an accepted command alone does not confirm the mechanism's position. Flash mode, firing and physical pop-up remain separate operations.
 
@@ -110,7 +110,7 @@ Select files, then choose **Export to folder** to copy them to a destination on 
 
 The transfer shows progress and supports **Cancel**. Completed files are kept; a failed or cancelled file can be selected again. Existing names receive a numeric suffix instead of being overwritten. Refresh a folder to see new camera files; refreshing clears the previous selection.
 
-Previews appear when the camera supplies a usable JPEG thumbnail, including for some RAW files. Unsupported RAW/video previews use a file placeholder and metadata. Capture dates are omitted when their camera timestamp format is unverified. Initial Camera Card support is limited to the qualified runtime described in [Camera support](COMPATIBILITY.md); other setups show an unavailable state. Browsing and one JPEG export have been checked on the listed setup; broader storage compatibility still needs testing. Formatting and deleting files on the camera are not offered.
+Previews appear when the camera supplies a usable JPEG thumbnail, including for some RAW files. Unsupported RAW/video previews use a file placeholder and metadata. Capture dates are omitted when their camera timestamp format is unavailable. Camera Card requires a supported Canon runtime; other setups show an unavailable state. Formatting and deleting files on the camera are not offered.
 
 ## 6. Review in Shot Inspector
 

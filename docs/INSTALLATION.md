@@ -6,18 +6,18 @@ You can start with a local photo library and add a camera later. Apertrove curre
 
 ## Download the portable app
 
-The published release is **0.10.3, dated 14 November 2026**. The current source includes later changes without a version bump, so some controls shown in these guides are not in that download.
+The published release is **0.10.4, dated 24 November 2026**.
 
-1. Open the [release page](https://github.com/M1denHvH/Apertrove/releases/tag/Release). Download `Apertrove-0.10.3-Windows-x64.zip` and `SHA256SUMS.txt` from the same release.
+1. Open the [release page](https://github.com/M1denHvH/Apertrove/releases/tag/Latest). Download `Apertrove-0.10.4-Windows-x64.zip` and `SHA256SUMS.txt` from the same release.
 2. Calculate the archive's hash in PowerShell and compare it with its line in the checksum file:
 
    ```powershell
-   Get-FileHash -Algorithm SHA256 -LiteralPath '.\Apertrove-0.10.3-Windows-x64.zip'
+   Get-FileHash -Algorithm SHA256 -LiteralPath '.\Apertrove-0.10.4-Windows-x64.zip'
    ```
 
 3. Extract the **entire ZIP** to a folder you can write to. Open **Apertrove.exe** there and keep the other files and subfolders alongside it. Moving only the EXE will break the portable app.
 
-The build is unsigned, so Windows may show a reputation prompt. Follow your organization's policy if it blocks the application. Back up your originals and local profile before replacing an existing build. To evaluate a specific source branch, follow [Development](DEVELOPMENT.md).
+The application is unsigned, so Windows may show a reputation prompt. Follow your organization's policy if it blocks the application. Back up your originals and local profile before replacing an existing copy.
 
 ## First launch without a camera
 
@@ -31,7 +31,7 @@ Reopen the wizard from **Settings → Setup and diagnostics → Setup guide**. T
 
 For camera controls, install an official compatible **Canon EDSDK x64 runtime** separately. Obtain it through Canon's software or developer program for your camera and region. EOS Utility or Picture Style Editor may supply suitable components depending on the release. Keep their installation and dependent files together; do not copy a random DLL from an unofficial download.
 
-[Canon EOS software](https://www.usa.canon.com/support/eos-utilities) · [Canon developer resources](https://asia.canon/en/campaign/developerresources/camera/cap)
+[Canon EOS software](https://www.usa.canon.com/support/eos-utilities)
 
 Apertrove searches common Canon installation directories. If needed, use **Choose SDK folder** in setup, or the custom EDSDK x64 folder under **Settings → Canon connection**, then check again. A loaded library confirms that Apertrove can load that runtime; camera capabilities are a separate check.
 

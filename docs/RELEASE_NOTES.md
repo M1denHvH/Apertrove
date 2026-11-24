@@ -1,22 +1,14 @@
-# What has changed
+# What has changed in Apertrove 0.10.4
 
-## Current development source
+The Windows x64 portable release was published on **24 November 2026**. It includes:
 
-The source still identifies itself as **0.10.3**. These changes follow the published archive and are not a new downloadable release:
+- Browse Camera Card folders with paged listings and view camera-provided JPEG thumbnails when available.
+- Export original files from Camera Card or import copies into the local Library.
+- Keep ordinary autofocus failures scoped to the focus operation, restore controls after a failed attempt and show concise feedback.
+- Recover camera-session state more clearly and keep press-and-hold controls protected during interrupted operations.
 
-- Live View uses one small histogram icon; the existing graph opens only when requested.
-- One AF control combines One Shot and AI Servo. Shutter requests can proceed with active Servo and wait for a short mode transition when needed.
-- Preview orientation follows current EVF camera data on supported combinations, with manual 90° rotation and a return to automatic orientation.
-- Camera arrivals keep their session context. Ambiguous delayed transfers can be assigned in Library without moving originals.
-- Development flash pop-up and BULB controls are available only for verified runtime/camera combinations, with unavailable fallback elsewhere. Their physical compatibility still needs hardware testing.
-- The public guides and demo screenshot gallery describe the current workspace.
+Camera behavior can vary by body, lens, firmware and runtime. See [Camera support](COMPATIBILITY.md) for current limits.
 
-Camera behavior also has automated fake-provider coverage. This proves application paths and error handling, not physical behavior on every camera. See [Camera support](COMPATIBILITY.md) for the initial native runtime scope and the limits of the new flash/BULB controls.
-
-## Published 0.10.3
-
-The [Windows portable release dated 14 November 2026](https://github.com/M1denHvH/Apertrove/releases/tag/Release) is a separate snapshot with the desktop workspace, sessions, Library, Live View tools, Shot Inspector, Lighting Studio and LAN remote.
-
-Download its Windows x64 ZIP and accompanying checksum file together. Extract the whole folder and install Canon components separately. [Installation](INSTALLATION.md)
+Download the Windows x64 ZIP and accompanying checksum file together from the [Latest release](https://github.com/M1denHvH/Apertrove/releases/tag/Latest). Extract the whole folder and install Canon components separately. [Installation](INSTALLATION.md)
 
 [Documentation](README.md) · [Project overview](../README.md)
