@@ -124,7 +124,15 @@ export default function CameraCard({camera,disabled=false,onConnect,onNotice,api
     try{await api.cardExportCancel({operationId:exportOwner.current.operationId});}catch(cause){setError(cleanError(cause));}
   };
   const toggle=id=>setSelected(old=>old.includes(id)?old.filter(value=>value!==id):[...old,id]);
-  const open=item=>item.kind==='file'?setPreview(item):void load(item.id);
+  const open=item=>{
+    if(item.kind==='file'){
+      // A tile can be opened before IntersectionObserver has queued its
+      // thumbnail (for example via keyboard navigation). Queue it here so the
+      // modal updates when the real camera preview arrives.
+      if(!images[item.id]&&item.thumbnailAvailable)queueThumbnail(item.id);
+      setPreview(item);
+    }else void load(item.id);
+  };
   const navigate=parentId=>{if(!loading&&!exporting)void load(parentId);};
   const allSelected=fileIds.length>0&&fileIds.every(id=>selectedSet.has(id));
   const isLocked=disabled||loading||exporting;
@@ -159,16 +167,18 @@ export default function CameraCard({camera,disabled=false,onConnect,onNotice,api
                 <label><input type="checkbox" checked={allSelected} disabled={!fileIds.length||isLocked} aria-label={t('cameraCard.select_loaded')} onChange={()=>setSelected(allSelected?[]:fileIds)}/><span>{selected.length?t('cameraCard.selected',{count:number(selected.length)}):t('cameraCard.items',{count:number(listing.total||listing.items.length)})}</span></label>
                 <div><button type="button" className="btn" disabled={!selected.length||isLocked} onClick={()=>transfer('import')}><Upload size={15}/>{t('cameraCard.import_library')}</button><button type="button" className="btn dark" disabled={!selected.length||isLocked} onClick={()=>transfer('export')}><Download size={15}/>{t('cameraCard.export_folder')}</button></div>
               </div>
-              <div className="camera-card-table" role="table" aria-label={t('cameraCard.files')}>
-                <div className="camera-card-row camera-card-table-head" role="row"><span role="columnheader">{t('cameraCard.name')}</span><span role="columnheader">{t('cameraCard.type')}</span><span role="columnheader">{t('cameraCard.size')}</span><span role="columnheader">{t('cameraCard.date')}</span></div>
-                {listing.items.map((item,index)=><div className={'camera-card-row'+(selectedSet.has(item.id)?' selected':'')+(item.kind==='unavailable'?' unavailable':'')} role="row" key={item.id??'unavailable-'+index}>
-                  <div role="cell" className="camera-card-file-name">
-                    {item.kind==='file'?<input type="checkbox" checked={selectedSet.has(item.id)} disabled={isLocked} aria-label={t('cameraCard.select_file',{name:item.name})} onChange={()=>toggle(item.id)}/>:<span className="camera-card-checkbox-space"/>}
+              <div className="camera-card-grid" role="list" aria-label={t('cameraCard.files')}>
+                {listing.items.map((item,index)=><article className={'camera-card-row camera-card-tile'+(selectedSet.has(item.id)?' selected':'')+(item.kind==='unavailable'?' unavailable':'')} role="listitem" key={item.id??'unavailable-'+index}>
+                  <div className="camera-card-tile-media">
+                    {item.kind==='file'?<label className="camera-card-tile-select"><input type="checkbox" checked={selectedSet.has(item.id)} disabled={isLocked} aria-label={t('cameraCard.select_file',{name:item.name})} onChange={()=>toggle(item.id)}/></label>:null}
                     <Thumbnail item={item} image={images[item.id]} onVisible={queueThumbnail} onOpen={()=>open(item)} disabled={isLocked||item.kind==='unavailable'} active={!loading&&!exporting} epoch={generation.current}/>
-                    <button type="button" className="camera-card-file-open" onClick={()=>open(item)} disabled={isLocked||item.kind==='unavailable'} title={item.error?cleanError(item.error):item.name}>{item.kind==='unavailable'?t('cameraCard.item_unavailable'):item.name}{item.kind==='unavailable'&&<small className="camera-card-item-error">{cleanError(item.error)||t('cameraCard.read_error')}</small>}{item.kind==='volume'&&item.volume?.capacity>0&&<small>{t('cameraCard.free_space',{free:fileSize(item.volume.free),capacity:fileSize(item.volume.capacity)})}</small>}</button>
+                    <span className="camera-card-format">{format(item)}</span>
                   </div>
-                  <span role="cell" className="camera-card-type">{format(item)}</span><span role="cell" className="camera-card-size">{item.kind==='file'?fileSize(item.size):'—'}</span><span role="cell" className="camera-card-date">{fileDate(item.date)}</span>
-                </div>)}
+                  <div className="camera-card-tile-info">
+                    <button type="button" className="camera-card-file-open" onClick={()=>open(item)} disabled={isLocked||item.kind==='unavailable'} title={item.error?cleanError(item.error):item.name}>{item.kind==='unavailable'?t('cameraCard.item_unavailable'):item.name}{item.kind==='unavailable'&&<small className="camera-card-item-error">{cleanError(item.error)||t('cameraCard.read_error')}</small>}{item.kind==='volume'&&item.volume?.capacity>0&&<small>{t('cameraCard.free_space',{free:fileSize(item.volume.free),capacity:fileSize(item.volume.capacity)})}</small>}</button>
+                    <div className="camera-card-metadata"><span className="camera-card-size">{item.kind==='file'?fileSize(item.size):'—'}</span><span className="camera-card-date">{fileDate(item.date)}</span></div>
+                  </div>
+                </article>)}
               </div>
             </>}
             {loading&&<div className="camera-card-skeleton" role="status" aria-label={t('cameraCard.loading')}>{[0,1,2,3].map(index=><span key={index}/>)}</div>}
