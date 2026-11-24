@@ -1,6 +1,6 @@
 {
   "name": "apertrove",
-  "version": "0.10.3",
+  "version": "0.10.4",
   "description": "Camera tethering, photo library and LAN remote for Canon EOS on Windows",
   "main": "electron/main.cjs",
   "author": "Apertrove contributors",

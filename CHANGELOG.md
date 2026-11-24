@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.10.4
+
+- Add camera-card browsing in Library with lazy folder listing, real camera thumbnails when available, preview tiles, metadata placeholders and explicit import/export actions.
+- Keep ordinary autofocus failures scoped to the focus operation, restore controls after a failed attempt and show concise focus feedback.
+- Preserve camera-session recovery and held-control safeguards while keeping detailed diagnostics in the activity log.
+
 ## 0.10.3
 
 - Add an English interface alongside Russian. Choose the language in setup or Settings and synchronize the main window, Shot Inspector and Web Remote.
