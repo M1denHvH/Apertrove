@@ -43,7 +43,16 @@ function capabilityReport({ state, read, storage, exports, restricted, evidence 
   add(captureGroup, 'capture', 'Удалённая съёмка', restricted ? 'unsupported' : evidence.capture ? 'ready' : state.saveTo ? 'unknown' : 'temporary',
     restricted ? 'Canon предусматривает для этой модели импорт.' : evidence.capture ? 'Получен файл после команды съёмки.' : state.saveTo ? 'Назначение на ПК настроено. Спуск ещё не проверен.' : 'Нужно рабочее соединение с сохранением на ПК.');
   add(captureGroup, 'shutterPress', 'Полунажатие / полный спуск', restricted ? 'unsupported' : 'unknown', unknownCommand);
-  add(captureGroup, 'bulb', 'Удержание Bulb с заданной выдержкой', 'unimplemented', 'Программное управление длительностью Bulb требует отдельного управления затвором.');
+  const accessoryRestricted=restricted||state.controlsOnly===true;
+  const workingAccessories=state.connected===true&&state.working===true&&state.eventsRegistered===true;
+  const bulbQualified=state.capabilities?.bulb===true&&state.bulb?.available===true;
+  const bulbUnknown=state.bulb?.confirmation==='unknown';
+  add(captureGroup,'bulb','BULB',accessoryRestricted?'unsupported':!workingAccessories?'unknown':bulbUnknown?'temporary':state.bulb?.status==='error'?'error':bulbQualified?'ready':state.capabilities?.bulb===false?'unsupported':'unknown',
+    accessoryRestricted?'Управление BULB недоступно в этом режиме подключения.':!workingAccessories?'Квалификация BULB проверяется при рабочем подключении. Команды не отправлялись.':bulbUnknown?'Завершение BULB не подтверждено. Проверьте камеру.':state.bulb?.status==='error'?state.bulb.error||'Состояние BULB требует проверки.':bulbQualified?'Протокол BULB доступен. Аппаратный результат этой диагностикой не проверялся.':state.capabilities?.bulb===false?'Протокол BULB этой камеры и версии SDK не квалифицирован. Команды старта, остановки и блокировки UI не отправляются.':'Поддержка BULB не подтверждена.');
+  const flashQualified=state.capabilities?.flashPopup===true&&state.flash?.available===true;
+  const flashUnknown=state.flash?.confirmation==='unknown';
+  add(captureGroup,'flashPopup','Подъём встроенной вспышки',accessoryRestricted?'unsupported':!workingAccessories?'unknown':flashUnknown?'temporary':state.flash?.status==='error'?'temporary':flashQualified?'ready':state.capabilities?.flashPopup===false?'unsupported':'unknown',
+    accessoryRestricted?'Подъём вспышки недоступен в этом режиме подключения.':!workingAccessories?'Квалификация подъёма вспышки проверяется при рабочем подключении. Команды не отправлялись.':flashUnknown?'Результат команды вспышки неизвестен. Проверьте камеру.':state.flash?.status==='error'?state.flash.error||'Состояние вспышки требует проверки.':flashQualified?state.flash?.accepted?'Команда подъёма принята. Физическое положение вспышки не подтверждено.':'Команда подъёма доступна. Физическое положение вспышки не проверялось.':state.capabilities?.flashPopup===false?'Подъём встроенной вспышки недоступен: команда для этой камеры и версии SDK не квалифицирована.':'Поддержка подъёма вспышки не подтверждена.');
   add(captureGroup, 'interval', 'Интервал и таймер', restricted ? 'unsupported' : evidence.capture ? 'ready' : 'unknown', 'Интервал выполняет Apertrove. Таймер камеры определяется списком режимов протяжки.');
   add(captureGroup, 'captureEvents', 'Завершение съёмки', evidence.capture ? 'ready' : 'unknown', 'Ожидается передача файла, включая серию RAW + JPEG.');
   const evf = read(0x500);
@@ -56,6 +65,7 @@ function capabilityReport({ state, read, storage, exports, restricted, evidence 
     position.code ? `Чтение EVF Zoom Position · ${hex(position.code)}` : 'Координаты прочитаны. Их изменение требует проверки границ на конкретной модели.');
   const mf = state.properties.afMode?.value === 3;
   add(focusGroup, 'autofocus', 'Автофокус', restricted ? 'unsupported' : mf ? 'temporary' : evidence.autofocus ? 'ready' : 'unknown', mf ? 'Объектив в MF.' : unknownCommand);
+  add(focusGroup, 'servo', 'AI Servo', restricted ? 'unsupported' : state.capabilities?.servo ? 'unknown' : 'temporary', state.capabilities?.servo ? 'Режим AF подтверждается чтением. Принятая команда AF не подтверждает непрерывное оптическое слежение.' : 'Камера должна предоставить режим AI Servo для выбора или чтения.');
   add(focusGroup, 'driveLens', 'Электронная доводка фокуса', restricted ? 'unsupported' : mf || evf.code ? 'temporary' : evidence.driveLens ? 'ready' : 'unknown', mf ? 'Объектив в MF.' : 'Требуется совместимый объектив и доступный Live View.');
   const focus = read(0x104);
   add(focusGroup, 'focusInfo', 'Информация о точках фокуса', evidence.focusInfo ? 'ready' : readStatus(focus.code), focus.code ? `Чтение на камере · ${hex(focus.code)}. Данные могут появиться в EVF.` : 'Камера отдаёт блок FocusInfo.');

@@ -1,17 +1,35 @@
-# Contributing
+# Contribute to Apertrove
 
-Start with an issue describing the user-visible problem, camera model, connection and proposed behavior. Small, focused pull requests are easiest to review.
+Reports from a real shoot are as useful as code. Tell us what you tried, what you expected and what happened; you do not need to know how the camera SDK works.
 
-Use Windows x64 and Node.js 24. Run `npm ci`, `npm test`, `npm run build` and `npm run preflight`. `node tests/designs.cjs` checks the UI without opening a camera session. Tests that access real cameras are explicit opt-in scripts; do not run shutter-release tests without the owner's permission.
+## Report a problem or share a camera result
 
-Keep all SDK calls inside the isolated worker. Never expose native pointers to Electron renderers or use unowned native buffers. Preserve existing photo files and settings. Camera writes must be capability checked; focus commands need bounded completion and release in `finally`.
+Use the [bug report form](https://github.com/M1denHvH/Apertrove/issues/new?template=bug_report.yml). Include Apertrove and Windows versions, reproduction steps and the result. For a camera issue, add the model, firmware, lens, shooting mode, USB connection and Canon runtime version if known. For a shutter problem, say whether you clicked, held, used a keyboard or had just changed Servo.
 
-Session destinations must remain fixed during an active capture job. Preset queues validate all steps, enforce single-shot drive and restore a snapshot even after cancellation/errors. Native burst tests require explicit permission and a bounded hold duration; a previous permission for two preset frames does not authorize additional bursts. Respect the hardware test budget files.
+Remove serial numbers, private paths, personal images, network details, QR codes and remote access keys before sharing screenshots or logs. Do not attach Canon DLLs, headers or proprietary dumps. Use [Security reporting](SECURITY.md) for a vulnerability.
 
-Run `npm run i18n:check` for dictionary changes and `npm run i18n:ui` (with Microsoft Edge installed) to check the interface with a mocked camera worker. Equipment cards can load and cache product images from validated official URLs. Keep those images out of the repository and document any unverified specifications.
+For a feature idea, describe the workflow in a [feature request](https://github.com/M1denHvH/Apertrove/issues/new?template=feature_request.yml).
 
-Do not commit EDSDK binaries, Canon headers/manuals, user libraries, photos, access keys or generated builds. Obtain the SDK separately from Canon. Describe hardware validation precisely: a test with one EOS model does not certify all SDK models.
+## Make a code change
 
-The interface supports Russian and English. Use shared translation keys for user-facing text, add both translations, and keep saved values independent of language. New designs must work with light/dark/system themes, arbitrary accents, keyboard navigation and reduced motion. [Localization guide](docs/localization.md)
+Follow [Development](docs/DEVELOPMENT.md) for Windows x64, Node.js 24, isolated profiles and the fake-provider test harness. Start with a small change and include tests for the behavior it fixes.
 
-By contributing, you agree that your original contribution is distributed under the repository's MIT license. Third-party code and assets must retain their licenses.
+Before a pull request, run the relevant synthetic checks plus `npm test`, `npm run i18n:check`, `npm run build` and `npm run preflight`. The [architecture guide](docs/ARCHITECTURE.md) explains the process boundaries.
+
+Keep these contracts intact:
+
+- Renderer requests go through preload and main; Canon calls remain in the existing camera worker.
+- Validate arguments, use camera-reported choices and preserve a clear stop/cleanup path.
+- Retain originals, Library records and transfer context. An unknown outcome must remain visible.
+- Preserve existing diagnostics, reports and test artifacts. Use fresh synthetic files/profiles for new checks.
+- Keep Canon binaries, proprietary headers, user data, secrets and generated builds out of Git.
+
+A passing fake test cannot qualify physical camera behavior. Agree a specific test with the owner before changing settings, moving a lens, taking a photograph, raising a flash or starting an exposure.
+
+## Improve the interface and guides
+
+Use translation keys for visible messages and supply English and Russian text. Keep saved values independent of the chosen language. Follow existing theme tokens and check light/dark themes, keyboard focus, arbitrary accent colors and reduced motion.
+
+Screenshots must be direct captures of the running application. Mark demo/fake camera data clearly and remove private information. Describe what a user can do and its current limits; keep internal research and validation history outside user navigation.
+
+Original contributions are distributed under the project's MIT license. Retain third-party notices.

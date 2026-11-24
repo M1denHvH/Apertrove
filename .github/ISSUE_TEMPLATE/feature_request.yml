@@ -1,0 +1,22 @@
+name: Feature request
+description: Suggest a focused improvement to Apertrove
+body:
+  - type: textarea
+    id: workflow
+    attributes:
+      label: What are you trying to do?
+      description: Describe the workflow and what currently gets in the way.
+    validations:
+      required: true
+  - type: textarea
+    id: change
+    attributes:
+      label: Proposed behavior
+      description: Explain how the change should work for a user.
+    validations:
+      required: true
+  - type: textarea
+    id: compatibility
+    attributes:
+      label: Camera or runtime requirements, if relevant
+      description: Link official references where available. Do not include proprietary SDK files or serial numbers.

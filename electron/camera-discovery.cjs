@@ -1,9 +1,11 @@
 const crypto=require('node:crypto');
+const {decodeCanonModelId}=require('./camera-accessory-support.cjs');
 const IMPORT_ONLY=new Set(['EOS M','EOS M2','EOS M3','EOS M5','EOS M6','EOS M10','EOS M100']);
 function text(value){return (typeof value==='string'?value:Buffer.from(value||[]).toString('utf8')).replace(/\0.*$/s,'').trim();}
 function describeCamera(info,index){
   const model=text(info.description)||'Canon',port=text(info.port);
-  return {id:crypto.createHash('sha256').update(port||`${model}:${index}`).digest('hex').slice(0,20),index,model};
+  const modelId=decodeCanonModelId(info.reserved);
+  return {...(modelId===null?{}:{modelId}),id:crypto.createHash('sha256').update(port||`${model}:${index}`).digest('hex').slice(0,20),index,model};
 }
 function modelCapabilities(model,hasLiveView){
   const normalized=String(model).replace(/^Canon\s+/i,'').trim().toUpperCase();

@@ -29,3 +29,5 @@ html{scrollbar-width:thin;scrollbar-color:var(--border) var(--background)}::-web
   from { opacity: .7; translate: 0 5px; }
 }
 :root[data-performance-mode] .capture-bar{backdrop-filter:none;background:var(--surface);box-shadow:none}
+
+#near,#far,#bulb-hold{touch-action:none;user-select:none;-webkit-user-select:none}#near.holding,#far.holding,#bulb-hold.holding{background:var(--accent-color);color:var(--on-accent)}.bulb-hold-row{display:flex;align-items:center;gap:12px;margin-top:14px}.bulb-hold-row output{font-variant-numeric:tabular-nums}

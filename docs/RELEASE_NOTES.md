@@ -1,12 +1,22 @@
-# Apertrove 0.10.3
+# What has changed
 
-The first public release candidate brings together tethered Canon EOS shooting, session folders, a photo library, a separate Shot Inspector window, Lighting Studio, and a phone browser remote.
+## Current development source
 
-- Choose English, Russian, or the system language. Existing profiles without a saved language keep Russian.
-- Set a theme, visual style and accent during setup, and use Performance Mode to reduce decorative effects.
-- Use Live View composition guides, camera presets, and ordered preset series where the camera supports them.
-- Review camera transfers in Shot Inspector or inspect imported frames and metadata from the library.
+The source still identifies itself as **0.10.3**. These changes follow the published archive and are not a new downloadable release:
 
-The Windows x64 release is an unsigned portable ZIP. Canon EDSDK is obtained separately. Canon EOS 2000D over USB is the model with recorded hardware validation. The packaged candidate’s verification used an isolated profile without a physical camera or Canon SDK initialization. Apertrove does not currently provide direct Wi-Fi camera control, video recording, or software-controlled Bulb timing.
+- Live View uses one small histogram icon; the existing graph opens only when requested.
+- One AF control combines One Shot and AI Servo. Shutter requests can proceed with active Servo and wait for a short mode transition when needed.
+- Preview orientation follows current EVF camera data on supported combinations, with manual 90° rotation and a return to automatic orientation.
+- Camera arrivals keep their session context. Ambiguous delayed transfers can be assigned in Library without moving originals.
+- Development flash pop-up and BULB controls are available only for verified runtime/camera combinations, with unavailable fallback elsewhere. Their physical compatibility still needs hardware testing.
+- The public guides and demo screenshot gallery describe the current workspace.
 
-This release copy updates Electron and Sharp from the original 0.10.3 source snapshot. See the [changelog](../CHANGELOG.md), [installation](INSTALLATION.md), [requirements](REQUIREMENTS.md) and [license notices](../THIRD_PARTY_NOTICES.md).
+Camera behavior also has automated fake-provider coverage. This proves application paths and error handling, not physical behavior on every camera. See [Camera support](COMPATIBILITY.md) for the initial native runtime scope and the limits of the new flash/BULB controls.
+
+## Published 0.10.3
+
+The [Windows portable release dated 14 November 2026](https://github.com/M1denHvH/Apertrove/releases/tag/Release) is a separate snapshot with the desktop workspace, sessions, Library, Live View tools, Shot Inspector, Lighting Studio and LAN remote.
+
+Download its Windows x64 ZIP and accompanying checksum file together. Extract the whole folder and install Canon components separately. [Installation](INSTALLATION.md)
+
+[Documentation](README.md) · [Project overview](../README.md)

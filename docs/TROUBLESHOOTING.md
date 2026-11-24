@@ -1,20 +1,54 @@
-# Troubleshooting Apertrove
+# Troubleshooting
 
-Check **Settings** → **Setup and diagnostics** → **Camera diagnostics** for runtime and camera problems. For imports and transfers, check **Tools** → **Activity log** and the session folder. [Setup instructions](INSTALLATION.md)
+[Installation](INSTALLATION.md) · [Camera support](COMPATIBILITY.md) · [User guide](USER_GUIDE.md)
+
+For a camera problem, begin with **Settings → Setup and diagnostics → Camera diagnostics**. For a missing photograph, check the camera/card, session folder, Library and **Tools → Activity log** before trying another capture.
+
+## Connect and set up
 
 | Symptom | What to check |
 | --- | --- |
-| Canon EDSDK cannot be found | Install official Canon software that supplies compatible x64 components for your model, or obtain the official SDK. In setup, choose the folder containing `EDSDK.dll` and select **Check again**. |
-| The SDK is found but fails to load | Open **What Apertrove checked** in the SDK check. Make sure the runtime is x64 and its dependencies are intact in the official installation. If it loads but initialization fails, keep the SDK file version and the error text for a report. |
-| The camera is missing or busy | Turn it on, use a USB data cable and try a direct USB port. Close EOS Utility, Picture Style Editor and other camera software. If Canon Webcam Utility is installed, check whether its background service is holding the device. Wait for in-camera writes to finish, then use **Find cameras** in diagnostics. |
-| Live View or an exposure setting is unavailable | Confirm the camera is connected for work and that an active session is open. Check the camera mode and wait for an active capture, transfer or series to finish. Camera diagnostics can show which controls are available, temporarily unavailable or unsupported. |
-| Autofocus is unverified | Use a compatible lens switched to AF and enable Live View when required. An accepted focus command can still leave the image soft, so check the preview. An unverified result gives no confirmation of focus acquisition or lens movement. |
-| Import cannot start | Open or create a session first. Check that its folder is writable and has room for the photos. JPEG, PNG, TIFF and supported camera RAW files can be imported. A RAW file may have no readable embedded preview. |
-| A camera transfer was acknowledged but the photo is missing | Check the session folder, Library and the activity log. Keep any card copy and any files already received. DATA-005 remains open. Apertrove sends Canon's download-complete acknowledgement before writing the file and registering it in the library. Avoid relying on a host-only transfer as your sole copy. |
-| The app couldn’t open the library | Read the startup error and check the drive and permissions if it says the library is unreadable. Retrying will not reset the library. If the app says a prior library was found, close it and back up the profile before inspecting or restoring anything. Preserve the existing library and your originals. |
-| Settings appear to be missing | Use the same Windows account and make sure the profile folder is writable. Check both the `Apertrove` and legacy `Focal Studio` folders under `%APPDATA%` before restoring a backup. |
-| Web Remote cannot be opened on your phone | Start the server on the PC’s private network interface and use the current QR link. Connect both devices to the same trusted LAN. Check that Windows Firewall permits the connection on that private network. Guest Wi-Fi often blocks access between devices. |
+| Canon runtime not found | Install official compatible x64 Canon components. Choose the folder containing EDSDK.dll and check again. |
+| Runtime found but cannot load | Open **What Apertrove checked**. Check x64 architecture and keep the official installation/dependencies together. Note the version and error text. |
+| Camera missing or busy | Use a USB data cable and direct port, turn it on, close EOS Utility/other camera apps, and check USB or Wi-Fi connection settings on the camera. |
+| Exposure control disabled | Check the mode dial and lens. Wait for an operation to finish; use diagnostics to inspect currently offered values. |
+| A different camera app stops working | Disconnect the working session in Apertrove before opening another camera application. |
 
-If a camera operation or shutdown reports **Unknown**, retain any files that already arrived and check the camera and session state before retrying. Unknown means Apertrove could not confirm the result.
+## Preview, focus and shutter
 
-If you report a problem, include the Apertrove version, Windows build, camera model, shooting mode, SDK file version if known, and steps to reproduce. Remove serial numbers, access keys, active QR links, private paths, and photographs before sharing. [Report a security issue](../SECURITY.md)
+| Symptom | What it means or what to try |
+| --- | --- |
+| Histogram empty | Start Live View and wait for a decoded frame. The chart icon opens/closes the graph; it describes that JPEG preview. An already open unavailable graph can still be closed. |
+| Portrait orientation is not automatic | The current camera/runtime may not provide live orientation data. Use the clockwise rotation icon; its tooltip identifies manual versus camera orientation. |
+| Camera data is available but the preview uses your angle | Manual rotation overrides automatic behavior. Use the nearby return-to-camera-orientation control. |
+| AF accepted but sharpness is unverified | A command result is not proof of optical focus. Inspect the preview and saved photograph. Check lens AF/MF and camera mode. |
+| Looking for the Servo switch | Open the arrow inside the AF control. When Servo is active, the main AI Servo button stops it. |
+| A short click behaves like a long series | Release the input or leave the app window, then inspect the camera. The maximum hold limit is a fallback. Report the drive mode, Servo state, input method and exact sequence. Do not treat this as normal behavior. |
+| Servo/shutter release is unknown | The app could not confirm the outcome. Check the camera before repeating a physical operation; follow the displayed recovery instruction. |
+| Flash pop-up or BULB disabled | Development support is limited to verified runtime/camera combinations. Other connections retain unavailable controls. For BULB, also set the camera to BULB mode or choose an offered Bulb shutter setting. See [Camera support](COMPATIBILITY.md). |
+| Raise-flash request accepted but position unclear | Check the physical flash. Command acceptance alone does not prove that the mechanism rose. |
+| BULB time says it is waiting | The camera has not supplied an exposure-time message. The app does not replace this with a local estimate. |
+| BULB stop failed or connection was lost | The exposure may still be active. Check the camera and follow recovery instructions; do not start another operation on the assumption that it ended. |
+
+## Files and review
+
+| Symptom | What to check |
+| --- | --- |
+| Camera photo missing | Preserve any card copy. Check the session output, Library and activity log. Live View/AF preview alone is not a saved photo. |
+| Camera photo in an unexpected session | Open it in Library. If an association warning appears, choose **Photo session**. Delayed events can be ambiguous; reassignment does not move originals. |
+| Import cannot start | Open a session and check its folder's permissions and free space. |
+| RAW cannot display or looks smaller than expected | Some RAW files lack a readable embedded JPEG. The displayed detail/histogram belongs to the embedded preview. Edited RAW-to-JPEG export is unavailable. |
+| Library cannot open | Read the error, check drive access, close the app and back up the profile. **Retry** does not reset the Library. Preserve records and originals before recovery. |
+| Settings appear missing | Use the same Windows account. Check the current `%APPDATA%\Apertrove` profile and a legacy `%APPDATA%\Focal Studio` profile before restoring a backup. |
+
+## Phone remote
+
+Select a reachable private interface and use the current QR link. The phone and PC must share a trusted LAN; guest Wi-Fi may isolate devices. Check private-network firewall access. The link contains an access key, so never post it publicly. Restarting the server changes the key.
+
+## Send a useful report
+
+You do not need to diagnose the SDK yourself. Tell us the steps, expected result and actual result, with Apertrove and Windows versions. For camera problems, add the model, firmware, lens, shooting mode and runtime version if known. Describe whether you clicked, held, used a keyboard, or switched Servo immediately before the problem.
+
+Remove private paths, personal images, serial numbers, network details, QR codes and remote keys from screenshots/logs. Do not attach Canon DLLs, headers or proprietary dumps. Keep a copy of the original log privately if it is needed later.
+
+[Report a problem](https://github.com/M1denHvH/Apertrove/issues/new?template=bug_report.yml) · [Report a security issue](../SECURITY.md)

@@ -26,6 +26,11 @@ test('Read-only and unsupported values are blocked before any SDK write',async()
   const r=rig({refresh:()=>({properties:{aperture:{writable:false,allowed:[0x30]}}})});await assert.rejects(r.control.property({key:'aperture',value:0x30}),/недоступен/);assert.equal(r.writes.length,0);
   const t=rig();await assert.rejects(t.control.property({key:'shutter',value:0xffff}),/недоступен/);assert.equal(t.writes.length,0);
 });
+test('Bulb readback is labelled without offering a host property write or an ordinary shutter pulse',async()=>{
+  assert.equal(valueLabel('shutter',0x0c),'Bulb');
+  const r=rig({refresh:()=>({properties:{shutter:{writable:true,allowed:[0x0c]}}})});
+  await assert.rejects(r.control.property({key:'shutter',value:0x0c}),/BULB недоступен/);assert.deepEqual(r.writes,[]);
+});
 test('Manual focus uses DriveLensEvf 0x103 with all six near/far step encodings',async()=>{
   const r=rig();for(const direction of ['near','far'])for(const step of [1,2,3])await r.control.focus({direction,step});
   assert.deepEqual(r.commands,[[0x103,1],[0x103,2],[0x103,3],[0x103,0x8001],[0x103,0x8002],[0x103,0x8003]]);
@@ -50,10 +55,10 @@ test('AF holds beyond the old 450ms pulse and waits for consecutive fresh confir
   const result=await r.control.autofocus();assert.equal(result.confirmed,true);assert.ok(result.durationMs>=2400);assert.deepEqual(r.commands,[[0x102,1],[0x102,0]]);assert.equal(states.at(-1).status,'focused');
 });
 test('Stale metadata never confirms AF and timeout always releases the lens',async()=>{
-  const r=rig({focusState:()=>({sequence:1,status:'focused'})});await assert.rejects(r.control.autofocus(),/12 секунд/);assert.deepEqual(r.commands,[[0x102,1],[0x102,0]]);assert.equal(r.control.isBusy(),false);
+  const r=rig({focusState:()=>({sequence:1,status:'focused'})});await assert.rejects(r.control.autofocus(),/Фокус не подтверждён/);assert.deepEqual(r.commands,[[0x102,1],[0x102,0]]);assert.equal(r.control.isBusy(),false);
 });
 test('Failed acquisition is reported honestly and frame streaming remains available during AF',async()=>{
-  let elapsed=0,sequence=0;const r=rig({now:()=>elapsed,wait:async ms=>{assert.equal(r.control.canStream(),true);elapsed+=ms;},focusState:()=>({sequence:++sequence,status:'failed'})});await assert.rejects(r.control.autofocus(),/не смогла/);assert.equal(r.commands.at(-1)[1],0);
+  let elapsed=0,sequence=0;const r=rig({now:()=>elapsed,wait:async ms=>{assert.equal(r.control.canStream(),true);elapsed+=ms;},focusState:()=>({sequence:++sequence,status:'failed'})});await assert.rejects(r.control.autofocus(),/Фокус не подтверждён/);assert.equal(r.commands.at(-1)[1],0);
 });
 test('An SDK failure while releasing AF clears busy state and never leaves a false focusing/success status',async()=>{
   const states=[];const r=rig({command:(id,param)=>{if(param===0)throw Error('release failed');},onAutofocus:state=>states.push(state)});

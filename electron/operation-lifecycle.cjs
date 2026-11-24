@@ -1,6 +1,6 @@
 // Transport ownership, independent of Electron, SDK bindings and filesystem ports.
 // A consumer deadline never proves producer completion or native cancellation.
-const SAFETY_METHODS=Object.freeze(['status','burstStop','producerFence','finalizeShutdown']);
+const SAFETY_METHODS=Object.freeze(['status','burstStop','servoStop','bulbStop','focusStop','producerFence','finalizeShutdown']);
 const TERMINAL_STATES=Object.freeze(['COMPLETED','FAILED','CANCELLED','UNKNOWN_TERMINATION']);
 const safetyDefault=method=>SAFETY_METHODS.includes(method);
 const exclusiveDefault=method=>!safetyDefault(method);
@@ -91,7 +91,7 @@ function createOperationClient({generation,send,clock=globalThis,getSessionEpoch
     }
     diagnostics.ignoredMessages++;return false;
   }
-  return {call,receive,snapshot,hasOutstanding:options=>!idle(active,options),closeAdmission(){if(!admissionOpen)return;admissionOpen=false;notify();},cancelAll(){for(const record of [...active.values()])cancel(record);},terminate,whenIdle(options={}){if(idle(active,options))return Promise.resolve(snapshot());return new Promise(resolve=>waiters.add({options:{...options},resolve}));}};
+  return {call,receive,snapshot,hasOutstanding:options=>!idle(active,options),closeAdmission(){if(!admissionOpen)return;admissionOpen=false;notify();},cancelMethod(method){let count=0;for(const record of [...active.values()])if(record.method===method){cancel(record);count++;}return count;},cancelAll(){for(const record of [...active.values()])cancel(record);},terminate,whenIdle(options={}){if(idle(active,options))return Promise.resolve(snapshot());return new Promise(resolve=>waiters.add({options:{...options},resolve}));}};
 }
 
 function createOperationHost({generation,handlers,send,getSessionEpoch=()=>null,isExclusive=exclusiveDefault,isSafetyMethod=safetyDefault,isCancellable=method=>method==='importCard',onChange=()=>{}}){

@@ -23,7 +23,8 @@ const seedFile=checked(process.env.APERTROVE_IC01_SEED_FILE,{existing:true});
 const seed=raw.readFileSync(seedFile);
 if(seed.length<4||seed.length>262144||seed.readUInt16BE(0)!==0xffd8||seed.readUInt16BE(seed.length-2)!==0xffd9)fail('IC01_GENERATED_JPEG_REQUIRED');
 const recoveryDestination=checked(process.env.APERTROVE_RECOVERY_DESTINATION);
-const allowed=new Set(['operation-lifecycle','transfer-context','transfer-producer'].map(name=>path.join(ROOT,'electron',name+'.cjs').toLowerCase()));
+const allowed=new Set(['operation-lifecycle','transfer-context','transfer-producer','servo-focus','camera-values','image-quality','bulb-control','shutter-latch','canon-exposure-protocol','focus-hold'].map(name=>path.join(ROOT,'electron',name+'.cjs').toLowerCase()));
+allowed.add(path.join(ROOT,'tests/ic01/card-fixture.cjs').toLowerCase());allowed.add(path.join(ROOT,'electron/camera-card.cjs').toLowerCase());
 const core=new Set(['fs','path','crypto','module']),originalLoad=Module._load,originalResolve=Module._resolveFilename;
 const denials=[];let expected=false;
 function deny(kind){if(denials.length<32)denials.push({kind:String(kind).slice(0,96),expected});fail('IC01_FAKE_NATIVE_OR_IMPORT_DENIED');}
@@ -46,12 +47,29 @@ let sessionEpoch=0,photoSequence=0,captureSequence=0,refSequence=0,messageCount=
 const fileRecords=[],references=new Map(),payloads=new Map(),deferredJobs=new Set(),issues=[];
 const h1={readOnlyConnects:0,workingConnects:0,diagnoses:0,propertyCalls:0,propertyWrites:0,captureCalls:0,liveCalls:0,autofocusCalls:0,focusCalls:0,listCardCalls:0,importCardCalls:0,readOnlyMutationAttempts:0};
 const h2={controlsOnlyConnects:0,blockedFileOperations:0,exposureWrites:[]};
+let bulbQualified=true,flashQualified=false,nextFlashError='none',nextFlashDelayMs=0;
+let productControls=false,nextServoError='none',nextBulbError='none',nextServoDelayMs=0;
+const productCalls={servoStarts:0,servoStops:0,bulbStarts:0,bulbStops:0,flashPopups:0};
 const contexts=createTransferContexts({recoveryDestination,newId:()=>generation});contexts.setRoute({sessionEpoch,sessionId:null,destination:''});
-const state={connected:false,working:false,live:false,model:null,properties:{},cameraId:null,capabilities:{capture:false,liveView:false,focus:false,manualFocus:false,import:false}};
+const unavailableOrientation=(status='unavailable')=>({available:false,status,rotation:null,source:null,reason:'SYNTHETIC_ORIENTATION_UNAVAILABLE'});
+const state={connected:false,working:false,live:false,model:null,properties:{},cameraId:null,liveOrientation:unavailableOrientation(),capabilities:{capture:false,liveView:false,focus:false,manualFocus:false,import:false,liveOrientation:false}};
+const {createCardFixture}=require('./card-fixture.cjs');
+const cardFixture=createCardFixture({seed,checked,raw,ensure:()=>{requireWorking();requireFileTransfer();},getState:()=>state,getEpoch:()=>sessionEpoch,send:message=>send(message),sleep:milliseconds=>new Promise(resolve=>setTimeout(resolve,milliseconds))});
 function post(message){if(++messageCount>1024)fail('IC01_MESSAGE_BUDGET');if(denials.some(item=>!item.expected))fail('IC01_UNEXPECTED_DENIAL');parent.postMessage(message);}
 function send(message){post(message.type==='operation'?message:{...message,generation,sessionEpoch});}
 function status(){const value=JSON.parse(JSON.stringify(state));send({event:'status',data:value});return value;}
 const sleep=milliseconds=>new Promise(resolve=>setTimeout(resolve,milliseconds));
+const {createFocusHold}=require('../../electron/focus-hold.cjs');
+const {createServoFocus}=require('../../electron/servo-focus.cjs'),{createBulbControl}=require('../../electron/bulb-control.cjs');
+const newServoControl=()=>createServoFocus({ensure:()=>requireWorking(),isLive:()=>state.live,canFocus:()=>state.properties.afMode?.value!==3,isCapturing:()=>!!held,get:id=>id===0x404?state.properties.afMode?.value:null,set:(id,value)=>{if(id!==0x404)fail('IC01_SERVO_PROPERTY_REFUSED');state.properties.afMode.value=value;},refresh:()=>state,command:(_id,value)=>{const action=value?'start':'stop';productCalls[value?'servoStarts':'servoStops']++;if(nextServoError===action){nextServoError='none';throw Error('Synthetic AI Servo '+action+' failure');}},onState:value=>{state.servo=value;status();}});
+const newBulbControl=()=>createBulbControl({qualified:true,ensure:()=>{requireWorking();if(state.mode!=='Bulb'&&state.properties.shutter?.value!==0x0c)throw Error('Set the synthetic camera to BULB first.');},lock:async()=>{},unlock:async()=>{},start:async()=>{productCalls.bulbStarts++;if(nextBulbError==='start'){nextBulbError='none';throw Error('Synthetic BULB start failure');}},end:async()=>{productCalls.bulbStops++;if(nextBulbError==='stop'){nextBulbError='none';throw Error('Synthetic BULB stop failure');}},onState:value=>{state.bulb=value;status();}});
+const {profileByFingerprint,createFlashPopupControl}=require('../../electron/canon-exposure-protocol.cjs');
+const fakeExposureProfile=profileByFingerprint({sha256:'35c5fd7564cf8eee3bc41004a0ab21d96caccb36ea1a1ddb512caf7b1c046627',version:'3.18.40.0',architecture:'x64'});
+const flashCommands=[];
+const newFlashControl=()=>createFlashPopupControl({profile:fakeExposureProfile,cameraQualified:flashQualified,io:{ensure:()=>{requireWorking();if(held||bulbControl.isBusy()||servoControl.isHeld())throw operationError('OPERATION_BUSY','Synthetic camera operation active.');},sendCommand:async(id,parameter)=>{productCalls.flashPopups++;flashCommands.push({command:id,parameter});const wait=nextFlashDelayMs;nextFlashDelayMs=0;if(wait)await sleep(wait);const error=nextFlashError;nextFlashError='none';return error==='unsupported'?7:error==='busy'?0x81:0;}},onState:value=>{state.flash=value;state.capabilities.flashPopup=value.available;status();}});
+let servoControl=newServoControl(),bulbControl=newBulbControl(),flashControl=newFlashControl(),temporaryFocus=false;
+const focusHold=createFocusHold({prepare:async()=>{requireWorking();if(held||bulbControl.isBusy()||servoControl.isHeld())throw operationError('OPERATION_BUSY','Synthetic camera busy.');temporaryFocus=!state.live;if(temporaryFocus){h1.liveCalls++;state.live=true;status();}},step:async()=>{requireWorking();h1.focusCalls++;},restore:async()=>{if(temporaryFocus){temporaryFocus=false;h1.liveCalls++;state.live=false;status();}},onState:value=>{state.focusHold=value;status();}});
+state.flash=flashControl.snapshot();state.servo=servoControl.snapshot();state.bulb={...bulbControl.snapshot(),available:false};
 function knownDeferred(job){deferredJobs.add(job);job.then(()=>deferredJobs.delete(job),()=>deferredJobs.delete(job));return job;}
 async function drainCallbacks(){while(deferredJobs.size)await Promise.allSettled([...deferredJobs]);await producer.drain();}
 function route(args={}){const destination=args.route?.destination??args.folder??contexts.snapshot().route?.destination??'';if(destination)checked(destination);contexts.setRoute({sessionEpoch,sessionId:args.route?.sessionId??null,destination});}
@@ -72,11 +90,25 @@ async function emitTransfer({name,kind='jpeg'}={}){
   try{const context=producer.admit(ref);fakeSDK.release(ref);await producer.drain();if(!payload.record)fail('IC01_TRANSFER_FAILED');return {...payload.record,context};}finally{payloads.delete(ref);}
 }
 const defaultCapture=()=>({mode:'normal',delayMs:0,secondDelayMs:350});
+const {holdShutter}=require('../../electron/shutter-latch.cjs');
+const shutterCommands=[];let burstLatch=null;
 let nextCapture=defaultCapture(),nextImport={delayMs:0},held=null,syntheticLiveView=false,frameTimer=null,frameSequence=0;
 function keys(value,allowed){if(!value||typeof value!=='object'||Array.isArray(value)||Object.keys(value).some(key=>!allowed.includes(key)))fail('IC01_CONTROL_CONFIGURATION_REFUSED');return value;}
 function delay(value,fallback=0){const number=value??fallback;if(!Number.isInteger(number)||number<0||number>2000)fail('IC01_CONTROL_DELAY_REFUSED');return number;}
 function configure(args){
-  keys(args,['nextCapture','nextImport','liveView']);
+  keys(args,['nextCapture','nextImport','liveView','liveOrientation','productControls','bulbQualified','nextServoError','nextServoDelayMs','nextBulbError','bulbElapsed','disconnect','flashQualified','nextFlashError','nextFlashDelayMs','cardScenario','cardDelayMs']);
+  cardFixture.configure(args);
+  if(args.flashQualified!==undefined){if(typeof args.flashQualified!=='boolean'||flashControl.isBusy())fail('IC01_FLASH_CAPABILITY_REFUSED');flashQualified=args.flashQualified;flashControl=newFlashControl();state.flash=flashControl.snapshot();state.capabilities.flashPopup=state.working&&state.flash.available;status();}
+  if(args.nextFlashError!==undefined){if(!['none','busy','unsupported'].includes(args.nextFlashError))fail('IC01_FLASH_ERROR_REFUSED');nextFlashError=args.nextFlashError;}
+  if(args.nextFlashDelayMs!==undefined)nextFlashDelayMs=delay(args.nextFlashDelayMs);
+  if(args.productControls!==undefined){if(typeof args.productControls!=='boolean')fail('IC01_PRODUCT_CONTROLS_REFUSED');productControls=args.productControls;}
+  if(args.bulbQualified!==undefined){if(typeof args.bulbQualified!=='boolean'||bulbControl.isBusy())fail('IC01_BULB_CAPABILITY_REFUSED');bulbQualified=args.bulbQualified;state.capabilities={...state.capabilities,bulb:state.working&&productControls&&bulbQualified};state.bulb={...bulbControl.snapshot(),available:state.capabilities.bulb};status();}
+  if(args.nextServoError!==undefined){if(!['start','stop','none'].includes(args.nextServoError))fail('IC01_SERVO_ERROR_REFUSED');nextServoError=args.nextServoError;}
+  if(args.nextServoDelayMs!==undefined)nextServoDelayMs=delay(args.nextServoDelayMs);
+  if(args.liveOrientation!==undefined){const value=keys(args.liveOrientation,['rotation','status']);if(!['active','unavailable','unknown'].includes(value.status)||value.status==='active'&&(!state.live||![0,90,180,270].includes(value.rotation)))fail('IC01_ORIENTATION_REFUSED');state.liveOrientation=value.status==='active'?{available:true,status:'active',rotation:value.rotation,source:'camera',reason:null}:unavailableOrientation(value.status);state.capabilities={...state.capabilities,liveOrientation:state.liveOrientation.available};status();}
+  if(args.nextBulbError!==undefined){if(!['start','stop','none'].includes(args.nextBulbError))fail('IC01_BULB_ERROR_REFUSED');nextBulbError=args.nextBulbError;}
+  if(args.bulbElapsed!==undefined){if(!Number.isSafeInteger(args.bulbElapsed)||args.bulbElapsed<0||args.bulbElapsed>86400)fail('IC01_BULB_TIME_REFUSED');bulbControl.event(args.bulbElapsed);}
+  if(args.disconnect!==undefined){if(args.disconnect!==true)fail('IC01_DISCONNECT_REFUSED');burstLatch?.release();servoControl.disconnected();bulbControl.disconnected();flashControl.disconnected();stopSyntheticFrames();Object.assign(state,{connected:false,working:false,live:false,liveOrientation:unavailableOrientation('disconnected'),capabilities:capabilities(false)});status();}
   if(args.nextCapture){const value=keys(args.nextCapture,['mode','delayMs','secondDelayMs']);if(!['normal','delayed','pair','hold','hang','unknown'].includes(value.mode))fail('IC01_CAPTURE_MODE_REFUSED');nextCapture={mode:value.mode,delayMs:delay(value.delayMs),secondDelayMs:delay(value.secondDelayMs,350)};}
   if(args.nextImport){const value=keys(args.nextImport,['delayMs']);nextImport={delayMs:delay(value.delayMs)};}
   if(args.liveView!==undefined){if(typeof args.liveView!=='boolean')fail('IC01_LIVE_VIEW_CONFIGURATION_REFUSED');syntheticLiveView=args.liveView;}
@@ -86,51 +118,66 @@ function requireConnected(){if(!state.connected)throw operationError('IC01_FAKE_
 function requireWorking(){requireConnected();if(!state.working){h1.readOnlyMutationAttempts++;fail('IC01_READ_ONLY_MUTATION_REFUSED');}}
 function requireFileTransfer(){if(state.controlsOnly){h2.blockedFileOperations++;throw operationError('OPERATION_ADMISSION_CLOSED','Synthetic controls-only connection forbids camera files.');}}
 function properties(){
-  const values={iso:[0x48,0x50],shutter:[0x70,0x75],aperture:[0x30,0x38],driveMode:[0,1],imageQuality:[0x0013ff0f],whiteBalance:[0,1],pictureStyle:[0x81],afMode:[0]};
-  return Object.fromEntries(Object.entries(values).map(([key,list])=>[key,{value:list[0],writable:true,allowed:list,choices:list.map(value=>({value,label:key+' '+value}))}]));
+  const values={iso:[0x48,0x50],shutter:productControls&&bulbQualified?[0x70,0x75,0x0c]:[0x70,0x75],aperture:[0x30,0x38],driveMode:[0,1],imageQuality:[0x0013ff0f],whiteBalance:[0,1],pictureStyle:[0x81],afMode:productControls?[0,1,2]:[0]};
+  return Object.fromEntries(Object.entries(values).map(([key,list])=>[key,{value:list[0],writable:true,allowed:list,choices:list.map(value=>({value,label:require('../../electron/camera-values.cjs').VALUES[key]?.find(item=>item.value===value)?.label||key+' '+value}))}]));
 }
-function capabilities(working,controlsOnly=false){return {capture:!!working&&!controlsOnly,import:!controlsOnly,liveView:!!working&&syntheticLiveView,focus:false,manualFocus:false,reason:working?null:'Explicit synthetic diagnostic connection.'};}
+function capabilities(working,controlsOnly=false){return {capture:!!working&&!controlsOnly,import:!controlsOnly,liveView:!!working&&syntheticLiveView,liveOrientation:!!working&&state.live&&state.liveOrientation.available,focus:!!working&&productControls,manualFocus:!!working&&productControls,servo:!!working&&productControls,bulb:!!working&&productControls&&bulbQualified,flashPopup:!!working&&productControls&&flashQualified,reason:working?null:'Explicit synthetic diagnostic connection.'};}
 function stopSyntheticFrames(){if(frameTimer){clearInterval(frameTimer);frameTimer=null;}}
 function sendSyntheticFrame(){if(state.connected&&state.working&&state.live)send({event:'frame',data:seed,sequence:++frameSequence,at:Date.now()});}
-const receipt=count=>({confirmation:'UNVERIFIED',nativeQuiescence:'UNKNOWN',shots:0,files:[],observedTransfers:count});
+const receipt=records=>({confirmation:'UNVERIFIED',nativeQuiescence:'UNKNOWN',shots:0,files:records.map(file=>({path:file.path,transferId:file.context.transferId})),observedTransferIds:records.map(file=>file.context.transferId),observedTransfers:records.length});
 async function capture(args,operation){
   h1.captureCalls++;requireWorking();requireFileTransfer();route(args);
   const plan=nextCapture;nextCapture=defaultCapture();const number=++captureSequence;
   contexts.noteCapture({operationId:operation.operationId,captureId:args.captureId||null,sessionEpoch});
   try{
+    if(args.burstMs){
+      return await new Promise((resolve,reject)=>{
+        held={mode:'burst',operationId:operation.operationId,number,resolve};
+        burstLatch=holdShutter({press:()=>{shutterCommands.push({operationId:operation.operationId,command:4,parameter:args.autofocus===false?0x10003:3,at:Date.now()});},release:()=>{servoControl.releaseAfterCapture(parameter=>shutterCommands.push({operationId:operation.operationId,command:4,parameter,at:Date.now()}));},onReleased:()=>{burstLatch=null;const pending=held;held=null;send({event:'burstReleased'});knownDeferred(emitTransfer({name:'burst-'+number,kind:'jpeg'}).then(record=>resolve(receipt([record])),reject));},onError:reject},args.burstMs);
+      });
+    }
     if(plan.mode==='unknown')throw operationError('OPERATION_UNKNOWN_TERMINATION','Explicit synthetic unknown producer outcome.');
     if(plan.mode==='hold'||plan.mode==='hang')return await new Promise(resolve=>{held={mode:plan.mode,operationId:operation.operationId,number,resolve};send({event:'ic01-held',data:{operationId:operation.operationId,mode:plan.mode}});});
     if(plan.delayMs)await sleep(plan.delayMs);
-    await emitTransfer({name:'capture-'+number,kind:'jpeg'});
+    const record=await emitTransfer({name:'capture-'+number,kind:'jpeg'});
     if(plan.mode==='pair')knownDeferred((async()=>{await sleep(plan.secondDelayMs);await emitTransfer({name:'late-raw-'+number,kind:'raw'});})().catch(()=>{issues.push('IC01_DEFERRED_TRANSFER_FAILED');send({event:'transferIssue',data:{code:'IC01_DEFERRED_TRANSFER_FAILED'}});}));
-    return receipt(1);
+    return receipt([record]);
   }finally{contexts.settleCapture(operation.operationId,{outcome:'SYNTHETIC_OBSERVATION_ONLY'});}
 }
 async function release(args={}){
   keys(args,['jpeg','raw']);if(args.jpeg!==undefined&&typeof args.jpeg!=='boolean'||args.raw!==undefined&&typeof args.raw!=='boolean')fail('IC01_RELEASE_ARGUMENTS_REFUSED');
   const pending=held;if(!pending)return {released:false,reason:'NO_HELD_SYNTHETIC_OPERATION'};
+  if(pending.mode==='burst')return {released:false,reason:'USE_SHUTTER_RELEASE_PIPELINE'};
   if(pending.mode==='hang')return {released:false,reason:'EXPLICIT_UNRESPONSIVE_FAKE'};
-  held=null;let count=0;
-  if(args.jpeg!==false){await emitTransfer({name:'released-jpeg-'+pending.number,kind:'jpeg'});count++;}
-  if(args.raw===true){await emitTransfer({name:'released-raw-'+pending.number,kind:'raw'});count++;}
-  pending.resolve(receipt(count));return {released:true,observedTransfers:count};
+  held=null;const records=[];
+  if(args.jpeg!==false)records.push(await emitTransfer({name:'released-jpeg-'+pending.number,kind:'jpeg'}));
+  if(args.raw===true)records.push(await emitTransfer({name:'released-raw-'+pending.number,kind:'raw'}));
+  pending.resolve(receipt(records));return {released:true,observedTransfers:records.length};
 }
-function snapshot(){return {provider:'IC01_SYNTHETIC_JS_ONLY',generation,sessionEpoch,photoSequence,connected:state.connected,working:state.working,controlsOnly:state.controlsOnly===true,eventsRegistered:state.eventsRegistered===true,saveTo:state.saveTo??null,fenced,held:held?{mode:held.mode,operationId:held.operationId}:null,h1:{...h1},h2:{...h2,exposureWrites:h2.exposureWrites.map(item=>({...item}))},transfers:producer.snapshot(),pendingCallbackJobs:deferredJobs.size,references:[...references.values()],files:fileRecords.map(item=>({...item})),denials:denials.map(item=>({...item})),issues:[...issues],messages:messageCount,nativeCalls:0,processId:process.pid,electronVersion:process.versions.electron};}
+function snapshot(){return {provider:'IC01_SYNTHETIC_JS_ONLY',card:cardFixture.snapshot(),generation,sessionEpoch,photoSequence,connected:state.connected,working:state.working,controlsOnly:state.controlsOnly===true,eventsRegistered:state.eventsRegistered===true,saveTo:state.saveTo??null,fenced,held:held?{mode:held.mode,operationId:held.operationId}:null,h1:{...h1},h2:{...h2,exposureWrites:h2.exposureWrites.map(item=>({...item}))},transfers:producer.snapshot(),operations:operations?.snapshot(),pendingCallbackJobs:deferredJobs.size,references:[...references.values()],files:fileRecords.map(item=>({...item})),denials:denials.map(item=>({...item})),issues:[...issues],messages:messageCount,nativeCalls:0,productCalls:{...productCalls},shutterCommands:shutterCommands.map(item=>({...item})),flash:flashControl.snapshot(),flashCommands:flashCommands.map(item=>({...item})),servo:servoControl.snapshot(),bulb:bulbControl.snapshot(),processId:process.pid,electronVersion:process.versions.electron};}
+async function setServoDelayed(enabled){requireWorking();if(!productControls)fail('IC01_SERVO_UNAVAILABLE');const pendingDelay=nextServoDelayMs;nextServoDelayMs=0;if(pendingDelay){state.servo={...servoControl.snapshot(),status:enabled?'starting':'stopping'};status();await sleep(pendingDelay);requireWorking();}return servoControl.set({enabled});}
 let operations;
 const handlers={
   listCameras:()=>[{id:'ic01-synthetic-camera',index:0,model:'IC01 Synthetic Camera'}],
   sdkEnvironment:()=>({status:'ready',architecture:process.arch,file:null,version:'SYNTHETIC_PROVIDER_ONLY',checks:[{result:'ready',source:'IC01 synthetic JavaScript provider'}],optional:{},error:null}),
-  connect:async args=>{if(args.cameraId&&args.cameraId!=='ic01-synthetic-camera')fail('IC01_CAMERA_ID_REFUSED');await producer.drain();const readOnly=args.readOnly===true,controlsOnly=args.controlsOnly===true;if(readOnly&&controlsOnly)fail('IC01_CONNECTION_MODE_REFUSED');if(state.connected&&state.working&&!readOnly&&!!state.controlsOnly!==controlsOnly)fail('IC01_CONNECTION_MODE_REFUSED');if(readOnly)h1.readOnlyConnects++;else if(controlsOnly)h2.controlsOnlyConnects++;else h1.workingConnects++;sessionEpoch++;const props=properties();for(const [key,value] of Object.entries(props))value.writable=!readOnly&&(!controlsOnly||['iso','shutter','aperture','compensation'].includes(key));Object.assign(state,{connected:true,working:!readOnly,controlsOnly,eventsRegistered:!readOnly&&!controlsOnly,cameraId:'ic01-synthetic-camera',model:'IC01 Synthetic Camera',description:'IC01 Synthetic Camera',connectedAt:Date.now(),mode:'M',battery:100,saveTo:readOnly||controlsOnly?null:3,properties:props,equipment:{firmware:'synthetic',lensName:'IC01 synthetic lens',lensAttached:false,availableShots:32,focalLength:50},capabilities:capabilities(!readOnly,controlsOnly)});route(args);return status();},
-  disconnect:async()=>{stopSyntheticFrames();await producer.drain();sessionEpoch++;contexts.setRoute({sessionEpoch,sessionId:null,destination:''});Object.assign(state,{connected:false,working:false,controlsOnly:false,eventsRegistered:false,saveTo:null,live:false,cameraId:null,model:null,properties:{},capabilities:capabilities(false)});return status();},
+  connect:async args=>{if(args.cameraId&&args.cameraId!=='ic01-synthetic-camera')fail('IC01_CAMERA_ID_REFUSED');await producer.drain();const readOnly=args.readOnly===true,controlsOnly=args.controlsOnly===true;if(readOnly&&controlsOnly)fail('IC01_CONNECTION_MODE_REFUSED');if(state.connected&&state.working&&!readOnly&&!!state.controlsOnly!==controlsOnly)fail('IC01_CONNECTION_MODE_REFUSED');if(readOnly)h1.readOnlyConnects++;else if(controlsOnly)h2.controlsOnlyConnects++;else h1.workingConnects++;sessionEpoch++;if(!state.connected){servoControl=newServoControl();bulbControl=newBulbControl();flashControl=newFlashControl();state.liveOrientation=unavailableOrientation();}const props=properties();for(const [key,value] of Object.entries(props))value.writable=!readOnly&&(!controlsOnly||['iso','shutter','aperture','compensation'].includes(key));Object.assign(state,{connected:true,working:!readOnly,controlsOnly,eventsRegistered:!readOnly&&!controlsOnly,servo:servoControl.snapshot(),flash:flashControl.snapshot(),bulb:{...bulbControl.snapshot(),available:productControls},cameraId:'ic01-synthetic-camera',model:productControls?'Demo camera':'IC01 Synthetic Camera',description:productControls?'Simulated camera preview':'IC01 Synthetic Camera',connectedAt:Date.now(),mode:'M',battery:100,saveTo:readOnly||controlsOnly?null:3,properties:props,equipment:{firmware:'synthetic',lensName:'IC01 synthetic lens',lensAttached:false,availableShots:32,focalLength:50},capabilities:capabilities(!readOnly,controlsOnly)});route(args);return status();},
+  disconnect:async()=>{await focusHold.stop();servoControl.disconnected();bulbControl.disconnected();flashControl.disconnected();stopSyntheticFrames();await producer.drain();sessionEpoch++;contexts.setRoute({sessionEpoch,sessionId:null,destination:''});Object.assign(state,{connected:false,working:false,controlsOnly:false,eventsRegistered:false,saveTo:null,live:false,liveOrientation:unavailableOrientation('disconnected'),cameraId:null,model:null,properties:{},capabilities:capabilities(false)});return status();},
   destination:async args=>{requireFileTransfer();await producer.drain();route(args);return true;},
   status:()=>status(),
   diagnoseCamera:()=>{requireConnected();if(state.working)fail('IC01_DIAGNOSIS_REQUIRES_READ_ONLY');h1.diagnoses++;return {checkedAt:new Date().toISOString(),model:'IC01 Synthetic Camera',firmware:'synthetic',working:state.working,sdkVersion:'SYNTHETIC_PROVIDER_ONLY',sdkPath:null,storage:[],rows:[{id:'iso',group:'Exposure',label:'ISO',status:'temporary',detail:'Synthetic descriptor-backed read-only observation.'}]};},
   property:({key,value})=>{h1.propertyCalls++;requireWorking();const property=state.properties[key];if(!property?.writable||!property.allowed.includes(value))fail('IC01_PROPERTY_REFUSED');if(state.controlsOnly){if(h2.exposureWrites.length>=16)fail('IC01_CONTROL_WRITE_BUDGET');h2.exposureWrites.push({key,before:property.value,value});}h1.propertyWrites++;property.value=value;return status();},
-  live:({enabled}={})=>{h1.liveCalls++;requireWorking();if(typeof enabled!=='boolean')fail('IC01_LIVE_ARGUMENTS_REFUSED');if(enabled&&!syntheticLiveView)fail('IC01_LIVE_VIEW_UNAVAILABLE');stopSyntheticFrames();state.live=enabled;if(enabled){sendSyntheticFrame();frameTimer=setInterval(sendSyntheticFrame,120);}return status();},
+  live:({enabled}={})=>{h1.liveCalls++;requireWorking();if(typeof enabled!=='boolean')fail('IC01_LIVE_ARGUMENTS_REFUSED');if(enabled&&!syntheticLiveView)fail('IC01_LIVE_VIEW_UNAVAILABLE');stopSyntheticFrames();state.live=enabled;if(!enabled){state.liveOrientation=unavailableOrientation('stopped');state.capabilities.liveOrientation=false;}if(enabled){sendSyntheticFrame();frameTimer=setInterval(sendSyntheticFrame,120);}return status();},
   autofocus:()=>{h1.autofocusCalls++;requireWorking();return status();},
   focus:()=>{h1.focusCalls++;requireWorking();return status();},
+  focusStart:args=>focusHold.start(args),focusStop:args=>focusHold.stop(args),
+  servo:args=>setServoDelayed(args.enabled),
+  servoStop:()=>setServoDelayed(false),
+  bulbStart:args=>{requireWorking();if(!productControls||!bulbQualified)fail('IC01_BULB_UNAVAILABLE');return bulbControl.start(args);},
+  bulbStop:()=>bulbControl.stop(),
   capture,
-  burstStop:()=>{send({event:'burstReleased'});return {released:true,syntheticOnly:true};},
+  flashSupport:()=>flashControl.snapshot(),flashPopup:()=>flashQualified?flashControl.popup():(()=>{throw Object.assign(Error('Synthetic flash popup protocol is unavailable.'),{code:'FLASH_POPUP_PROTOCOL_UNQUALIFIED'});})(),
+  burstStop:()=>{burstLatch?.release();return {released:true,syntheticOnly:true};},
+  cardList:args=>cardFixture.list(args),cardThumbnail:args=>cardFixture.thumbnail(args),cardExport:(args,operation)=>cardFixture.export(args,operation),
   listCard:()=>{h1.listCardCalls++;requireWorking();requireFileTransfer();return [{id:'item-1',name:'synthetic-card-1.jpg',size:seed.length},{id:'item-2',name:'synthetic-card-2.jpg',size:seed.length}];},
   importCard:async(args,operation)=>{
     h1.importCardCalls++;requireWorking();requireFileTransfer();if(!Array.isArray(args.ids)||!args.ids.length||args.ids.length>2||args.ids.some(id=>!['item-1','item-2'].includes(id)))fail('IC01_CARD_ITEMS_REFUSED');
@@ -139,10 +186,11 @@ const handlers={
     for(const id of args.ids){operation.cancellation.throwIfRequested();if(plan.delayMs)await sleep(plan.delayMs);operation.cancellation.throwIfRequested();const record=writeOriginal('card-'+id+'-'+(++refSequence),'jpeg',folder,{...context,transferId:generation+':card:'+refSequence},false);files.push({path:record.path});await new Promise(resolve=>setImmediate(resolve));}
     operation.cancellation.throwIfRequested();return files;
   },
-  producerFence:async()=>{operations.stopAdmission();await operations.whenIdle({exclusiveOnly:true});await drainCallbacks();producer.fence();fenced=true;return {drained:true,lastPhotoSequence:photoSequence,proof:'synthetic',nativeStarted:false,transfers:producer.snapshot()};},
-  finalizeShutdown:async()=>{if(!fenced)throw operationError('OPERATION_ADMISSION_CLOSED','Synthetic producer fence required.');await drainCallbacks();stopSyntheticFrames();shuttingDown=true;clearTimeout(hardDeadline);send({event:'shutdown'});setTimeout(()=>process.exit(0),20);return {closed:true,lastPhotoSequence:photoSequence,proof:'synthetic',nativeStarted:false,observations:{hasFailures:false},transfers:producer.snapshot()};}
+  producerFence:async()=>{operations.stopAdmission();await operations.whenIdle({exclusiveOnly:true});await focusHold.stop();await drainCallbacks();producer.fence();fenced=true;return {drained:true,lastPhotoSequence:photoSequence,proof:'synthetic',nativeStarted:false,transfers:producer.snapshot()};},
+  finalizeShutdown:async()=>{await focusHold.stop();servoControl.stop();await bulbControl.shutdown();if(!fenced)throw operationError('OPERATION_ADMISSION_CLOSED','Synthetic producer fence required.');await drainCallbacks();stopSyntheticFrames();shuttingDown=true;clearTimeout(hardDeadline);send({event:'shutdown'});setTimeout(()=>process.exit(0),20);return {closed:true,lastPhotoSequence:photoSequence,proof:'synthetic',nativeStarted:false,observations:{hasFailures:false},transfers:producer.snapshot()};}
 };
-operations=createOperationHost({generation,handlers,send,getSessionEpoch:()=>sessionEpoch});
+const guardedHandlers=Object.fromEntries(Object.entries(handlers).map(([method,handler])=>[method,(args,context)=>{if(focusHold.isBusy()&&!['status','focusStop','disconnect','producerFence','finalizeShutdown'].includes(method))throw operationError('OPERATION_BUSY','Synthetic focus hold active.');if(productControls&&servoControl.isHeld()&&!['status','capture','burstStop','servoStop','bulbStop','servo','property','live','disconnect','producerFence','finalizeShutdown'].includes(method))throw operationError('OPERATION_BUSY','Stop synthetic Servo first.');if(productControls&&state.servo.enabled===null&&state.connected&&!['status','burstStop','servoStop','disconnect','producerFence','finalizeShutdown'].includes(method))throw operationError('OPERATION_UNKNOWN_TERMINATION','Synthetic Servo release is unknown.');return handler(args,context);} ]));
+operations=createOperationHost({generation,handlers:guardedHandlers,send,getSessionEpoch:()=>sessionEpoch,isCancellable:method=>['importCard','cardExport'].includes(method)});
 let rejectedControls=0;
 async function control(message){
   const controlId=typeof message.controlId==='string'&&/^[A-Za-z0-9_.:-]{1,160}$/.test(message.controlId)?message.controlId:null;

@@ -5,10 +5,10 @@ import React,{useState} from 'react';
 import {Plus,ChevronUp,ChevronDown,X,Copy,Play,Square,SlidersHorizontal,Images,Pencil,GripVertical} from 'lucide-react';
 const mime='application/x-apertrove-preset';
 const propertyNames=localized(() => ({driveMode:t("presetSeries.drive_mode"),imageQuality:t("presetSeries.format"),iso:'ISO',shutter:t("presetSeries.shutter_speed"),aperture:t("presetSeries.aperture"),whiteBalance:'WB',compensation:'EV',pictureStyle:'Picture Style',afMode:'AF',liveAfMode:t("presetSeries.af_method")}));
-export default function PresetSeries({data,session,run,onEdit,onView}){
+export default function PresetSeries({data,session,run,onEdit,onView,cameraLocked=false}){
   const [over,setOver]=useState(null),queue=session?.presetQueue||[],job=data.series;
   const active=job&&['running','stopping','restoring'].includes(job.status);
-  const locked=active||!!data.operationState?.busy||!!data.interval||!!data.captureState?.active||!!data.burst&&['holding','transferring'].includes(data.burst.status);
+  const locked=cameraLocked||active||!!data.operationState?.busy||!!data.interval||!!data.captureState?.active||!!data.burst&&['holding','transferring'].includes(data.burst.status);
   const unconfirmed=job?.status==='unconfirmed'||job?.confirmation==='UNVERIFIED';
   const save=ids=>run('seriesQueue',()=>window.focal.seriesQueue({ids}));
   const missing=preset=>Object.entries(preset.values).filter(([key,value])=>{const prop=data.camera.properties?.[key],label=data.values[key]?.find(v=>v.value===value)?.label;return !prop?.writable||!(prop.allowed?.includes(value)||label&&prop.choices?.some(c=>c.label===label));}).map(([key])=>propertyNames()[key]||key);

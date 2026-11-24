@@ -48,7 +48,7 @@ test('control-only writes are restricted to exposure and explicit EVF properties
 function evfRig({output=1,mode=0,restoreMismatch=false}={}){
   const values=new Map([[0x500,output],[0x501,mode]]),writes=[],events=[],failures=[],state={controlsOnly:true,capabilities:{liveView:true}};
   const context=load(section(worker,'function restoreLiveView()','\nfunction readFocus'),{
-    state,evfRestore:null,live:false,captureWait:null,controls:{isBusy:()=>false},ensureWorking:()=>{},
+    state,evfRestore:null,live:false,captureWait:null,controls:{isBusy:()=>false,stopServo:()=>{},isServoBusy:()=>false},liveOrientation:{start:()=>{},stop:()=>{}},ensureWorking:()=>{},
     get:id=>restoreMismatch&&context.evfRestore&&writes.length>=2?99:values.get(id),
     set:(id,value)=>{writes.push([id,value]);values.set(id,value);},status:()=>state,refresh:()=>state,releaseEvf:()=>{},
     performance:{now:()=>0},statsAt:0,statsFrames:0,statsBytes:0,teardownUncertain:false,currentOperation:null,
@@ -80,14 +80,14 @@ test('control-only Live View stop reads actual AF state after restore and keeps 
   const comparison=section(stageSource,'  const propertiesRestored=','\n  try{');
   for(const finalAF of [2,0]){
     const actions=[],values=new Map([[0x500,0],[0x501,1],[0x400,3],[PROPS.iso,88],[PROPS.shutter,123],[PROPS.aperture,80],[PROPS.whiteBalance,0],[PROPS.liveAfMode,0]]);
-    const state={working:true,controlsOnly:true,model:'synthetic',properties:{},capabilities:{liveView:true}};let context,started=false;
+    const state={working:true,controlsOnly:true,model:'synthetic',properties:{},capabilities:{liveView:true},liveOrientation:{available:false}};let context,started=false;
     const source=section(worker,'function refresh()','\nfunction listCameras(')+section(worker,'const status =','\nconst errors=')+section(worker,'function restoreLiveView()','\nfunction readFocus')+comparison;
     context=load(source,{
-      state,camera:{},restricted:false,PROPS,choices,WHITE_BALANCE_COLOR_TEMPERATURE,live:false,evfRestore:null,
+      state,camera:{},accessorySupport:{},sessionEventsRegistered:false,restricted:false,PROPS,choices,WHITE_BALANCE_COLOR_TEMPERATURE,live:false,evfRestore:null,
       get:id=>{const value=id===PROPS.afMode?(context.live?0:started?finalAF:2):(values.get(id)??0);actions.push({kind:'read',id,value});return value;},
       set:(id,value)=>{assert.notEqual(id,PROPS.afMode);actions.push({kind:'write',id,value});values.set(id,value);if(id===0x500&&(value&2))started=true;},
       readData:()=>null,textProperty:()=>'',sdk:{desc:(_camera,_id,out)=>{out.values=[0,1,2];out.count=3;return 0;}},
-      captureWait:null,controls:{isBusy:()=>false},ensureWorking:()=>{},releaseEvf:()=>actions.push({kind:'release'}),send:()=>{},
+      captureWait:null,controls:{isBusy:()=>false,stopServo:()=>{},isServoBusy:()=>false,isServoHeld:()=>false},liveOrientation:{start:()=>{},stop:()=>{}},ensureWorking:()=>{},releaseEvf:()=>actions.push({kind:'release'}),send:()=>{},
       performance:{now:()=>0},statsAt:0,statsFrames:0,statsBytes:0,teardownUncertain:false,currentOperation:null,observations:{failure:()=>{}},operationError:fault
     },['refresh','liveView','propertiesRestored']);
     // Both models start with AI Focus=2, then report One Shot=0 while EVF is on.
@@ -121,8 +121,9 @@ test('read-only status keeps every property unwritable despite cached descriptor
 test('control-only capture and card traversal stop before SDK/file effects',async()=>{
   const ports={state:{controlsOnly:true,capabilities:{capture:false,reason:'disabled'}},ensure:()=>{},ensureWorking:()=>{},operationError:fault};
   const context=load(section(worker,'function capture(','\nfunction stopBurst'),ports,['capture']);assert.throws(()=>context.capture({}),/disabled/);
-  const card=load(section(worker,'async function listCard()','\nconst controls='),ports,['listCard']);await assert.rejects(card.listCard(),/отключена/);
-  for(const [name,end] of [['importCard','\n  producerFence:'],['destination',',status:']]){
+  const card=load(section(worker,'function cardEnsure(){','\nconst cardDownloader='),{...ports,captureWait:null,controls:{isBusy:()=>false}},['cardEnsure']);
+  assert.throws(()=>card.cardEnsure(),error=>error.code==='OPERATION_ADMISSION_CLOSED');
+  for(const [name,end] of [['destination',',status:']]){
     const source=section(worker,name+':async',end),context=load('const handler=({'+source+'}).'+name+';',{...ports},['handler']);
     await assert.rejects(context.handler({ids:['synthetic'],folder:'synthetic'},{}),error=>error.code==='OPERATION_ADMISSION_CLOSED');
   }
@@ -140,6 +141,24 @@ test('control-only AF requires live and returns only UNVERIFIED after one bounde
   await control.focus({direction:'near',step:1});await control.focus({direction:'far',step:1});assert.deepEqual(commands.slice(2),[[0x103,1],[0x103,0x8001]]);
 });
 
+test('a returned control-only AF rejection stays a command failure rather than quarantining the session',()=>{
+  const commands=[],events=[],entries=[];let attempt=0;
+  const source=section(worker,'  command:(id,param,action)=>','\n});');
+  const context=load('const command=({'+source+'}).command;',{
+    shutterTrace:()=>{},currentOperation:{operationId:'af-1'},state:{controlsOnly:true},live:true,controlAfStopPending:false,
+    ensure:()=>{},camera:{},get:id=>id===0x500?2:1,
+    observed:(method,phase,fn,kind)=>{const code=fn();entries.push({method,phase,code,kind});if(code!==0&&kind!=='command-result')events.push({event:'nativeObservation',data:{classification:'UNKNOWN'}});return code;},
+    check:code=>{if(code)throw Object.assign(Error('focus not acquired'),{code});},
+    sdk:{command:(_camera,id,param)=>{commands.push([id,param]);return ++attempt===1?0x8d01:0;}},
+  },['command']);
+  assert.throws(()=>context.command(0x102,1,'AF'),error=>error.code===0x8d01);
+  context.command(0x102,0,'AF release');
+  assert.deepEqual(commands,[[0x102,1],[0x102,0]]);
+  assert.ok(entries.every(entry=>entry.kind==='command-result'));
+  assert.equal(events.length,0);
+  assert.equal(context.controlAfStopPending,false);
+});
+
 test('AF always attempts one owed OFF after a possibly dispatched ON exception or stopped live stream',async()=>{
   for(const onThrows of [true,false]){
     const commands=[];let live=true;
@@ -154,7 +173,7 @@ test('AF always attempts one owed OFF after a possibly dispatched ON exception o
 test('worker permits only the owed AF stop after Live View stops, never a shutter or lens command',()=>{
   const commands=[],source=section(worker,'  command:(id,param,action)=>','\n});');
   const context=load('const command=({'+source+'}).command;',{
-    state:{controlsOnly:true},live:true,controlAfStopPending:false,ensure:()=>{},camera:{},get:id=>id===0x500?2:1,observed:(_name,_phase,fn)=>fn(),
+    shutterTrace:()=>{},currentOperation:null,state:{controlsOnly:true},live:true,controlAfStopPending:false,ensure:()=>{},camera:{},get:id=>id===0x500?2:1,observed:(_name,_phase,fn)=>fn(),
     check:code=>assert.equal(code,0),sdk:{command:(_camera,id,param)=>{commands.push([id,param]);return 0;}}
   },['command']);
   context.command(0x102,1);context.live=false;
@@ -168,7 +187,7 @@ test('EVF copies only a positive position bounded by a fresh GetLength result',(
     const copied=[],events=[],reads=[];const context=load(section(worker,'function frame(publish=true)','\nasync function previewFocus'),{
       state:{controlsOnly:true},camera:{},evfStream:{},evfImage:{},live:true,statsAt:0,statsFrames:0,statsBytes:0,totalFrames:0,evidence:{},
       sdk:{seek:()=>0,evf:()=>0,pointer:(_ref,out)=>{out[0]={opaque:true};return 0;},position:(_ref,out)=>{out[0]=position;return 0;},length:(_ref,out)=>{reads.push('length');out[0]=available;return 0;}},
-      check:code=>assert.equal(code,0),readFocus:()=>{},copyNativeBuffer:(_ptr,size)=>{copied.push(size);return Buffer.alloc(size);},
+      check:code=>assert.equal(code,0),readFocus:()=>{},liveOrientation:{sample:()=>{}},copyNativeBuffer:(_ptr,size)=>{copied.push(size);return Buffer.alloc(size);},
       send:value=>events.push(value),performance:{now:()=>0},Date:{now:()=>0},restoreLiveView:()=>{},releaseEvf:()=>{},status:()=>{},log:()=>{},
       teardownUncertain:false,observations:{failure:()=>{}}
     },['frame']);

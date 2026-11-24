@@ -1,23 +1,27 @@
 // Camera commands are deliberately separate from the transport so the actual SDK
 // command IDs, capability checks and read-back behaviour can be verified without USB.
 const {PROPS,WHITE_BALANCE_COLOR_TEMPERATURE,valueLabel,resolveValue}=require('./camera-values.cjs');
+const {createServoFocus}=require('./servo-focus.cjs');
 const COMMANDS=Object.freeze({autofocus:0x102,driveLens:0x103,shutter:4});
 const LABELS={meteringMode:'Замер экспозиции',imageQuality:"Формат снимка",driveMode:'Режим съёмки',afMode:'Режим AF',liveAfMode:'Метод Live View',iso:'ISO',aperture:'Диафрагма',shutter:'Выдержка',compensation:'Экспокоррекция',whiteBalance:'Баланс белого',colorTemperature:'Цветовая температура',pictureStyle:'Picture Style'};
 function createCameraControl(io){
   const wait=io.wait||((ms)=>new Promise(resolve=>setTimeout(resolve,ms)));
   let active=false,autofocusing=false;
+  const servoControl=createServoFocus({...io,isBusy:()=>active,onState:io.onServo,onUnknown:io.onServoUnknown});
   async function setFocusMode(value){
     let last;
     for(const pause of [0,100,180,300,450,600]){if(pause)await wait(pause);io.ensure();try{io.set(PROPS.afMode,value);if(io.get(PROPS.afMode)===value)return;}catch(error){last=error;if(error.code!==0x81)throw error;}}
     throw last||Error('Камера не подтвердила режим AF.');
   }
   async function exclusive(fn){
-    io.ensure();if(io.isCapturing()||active)throw Error('Дождитесь завершения текущей команды камеры.');
+    io.ensure();if(io.isCapturing()||active||servoControl.isBusy()||servoControl.isHeld())throw Error('Дождитесь завершения текущей команды камеры.');
     active=true;try{return await fn();}finally{active=false;}
   }
   async function property({key,value}){
+    servoControl.stop();
     return exclusive(async()=>{
       if(!Object.hasOwn(PROPS,key)||!Number.isInteger(value)||value<0||value>0xffffffff)throw Error('Некорректный параметр камеры.');
+      if(key==='shutter'&&value===0x0c&&io.canBulb?.()!==true)throw Error('BULB недоступен: протокол этой камеры и версии SDK не квалифицирован.');
       const properties=io.refresh().properties,p=properties[key];
       const target=resolveValue(key,value,p?.allowed||[]);
       const colorTemperature=key==='colorTemperature';
@@ -84,9 +88,9 @@ function createCameraControl(io){
           successes=sample.status==='focused'?successes+1:0;
           failures=sample.status==='failed'?failures+1:0;
           if(successes>=2){confirmedSample=sample;result={status:'focused',confirmed:true,durationMs:now()-start,method:native?'viewfinder':'live'};break;}
-          if(failures>=3&&now()-start>=1800)throw Error('Камера не смогла навести резкость. Выберите контрастный объект и проверьте AF на объективе.');
+          if(failures>=3&&now()-start>=1800){io.log?.('info','Камера не смогла навести резкость. Выберите контрастный объект и проверьте AF на объективе.');throw Error('Фокус не подтверждён');}
         }
-        if(!result)throw Error('За 12 секунд камера не подтвердила фокус. Проверьте AF на объективе, освещение и область фокусировки.');
+        if(!result){io.log?.('info','За 12 секунд камера не подтвердила фокус. Проверьте AF на объективе, освещение и область фокусировки.');throw Error('Фокус не подтверждён');}
       }catch(e){io.onAutofocus?.({status:'failed',message:e.message});throw e;
       }finally{
         try{if(started)io.command(native?COMMANDS.shutter:COMMANDS.autofocus,0,'Завершение команды автофокуса');}
@@ -97,6 +101,6 @@ function createCameraControl(io){
       io.onAutofocus?.(result);io.log?.(result.confirmed?'success':'info',result.confirmed?'Автофокус: резкость подтверждена камерой.':'Команда AF выполнена; попадание в фокус не подтверждено.');return result;
     });
   }
-  return {property,focus,autofocus,isBusy:()=>active,canStream:()=>!active||autofocusing};
+  return {property,focus,autofocus,servo:servoControl.set,stopServo:servoControl.stop,servoDisconnected:servoControl.disconnected,servoConnected:servoControl.connected,servoState:servoControl.snapshot,isServoBusy:servoControl.isBusy,isServoHeld:servoControl.isHeld,releaseAfterCapture:servoControl.releaseAfterCapture,isBusy:()=>active||servoControl.isBusy(),canStream:()=>!active||autofocusing};
 }
 module.exports={createCameraControl,COMMANDS};

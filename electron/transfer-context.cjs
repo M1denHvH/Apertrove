@@ -4,7 +4,8 @@ function createTransferContexts({recoveryDestination,newId}={}){
   if(typeof recoveryDestination!=='string'||!recoveryDestination||typeof newId!=='function')throw TypeError('Explicit recovery destination and identity factory required.');
   const scope=newId();
   if(typeof scope!=='string'||!scope||scope.length>128||/[\r\n\0]/.test(scope))throw TypeError('Invalid transfer identity scope.');
-  let route=null,revision=0,sequence=0,tainted=false,captureHistory=false,active=null,lastSettled=null;
+  let route=null,revision=0,sequence=0,tainted=false,captureHistory=false,active=null,lastSettled=null,routeBudgetExceeded=false;
+  const captureRoutes=new Map();
   const freeze=value=>{
     if(value&&typeof value==='object'){
       for(const child of Object.values(value))freeze(child);
@@ -24,8 +25,10 @@ function createTransferContexts({recoveryDestination,newId}={}){
     if(expected!==undefined&&epoch(expected)!==route.sessionEpoch)throw failure('TRANSFER_STALE_EPOCH','The callback belongs to a different native session epoch.');
   }
   function snapshot(){
-    return freeze({route:route?{...route}:null,routeRevision:revision,recoveryRoute:tainted||!!route&&!route.destination,captureHistory,
-      activeIntent:active?{...active}:null,lastSettledIntent:lastSettled?{...lastSettled}:null,nativeQuiescence:'UNVERIFIED'});
+    const candidates=[...captureRoutes.values()],sessionCount=new Set(candidates.map(candidate=>candidate.sessionId)).size;
+    return freeze({route:route?{...route}:null,routeRevision:revision,recoveryRoute:routeBudgetExceeded||sessionCount>1||!!route&&!(active?.route||candidates.at(-1)||route).destination,captureHistory,
+      activeIntent:active?{...active}:null,lastSettledIntent:lastSettled?{...lastSettled}:null,
+      captureRoutes:[...captureRoutes.values()],routeBudgetExceeded,nativeQuiescence:'UNVERIFIED'});
   }
   function setRoute({sessionEpoch,sessionId=null,destination}={}){
     const next={sessionEpoch:epoch(sessionEpoch),sessionId:identity(sessionId,true),destination};
@@ -50,7 +53,14 @@ function createTransferContexts({recoveryDestination,newId}={}){
   }
   function noteCapture({operationId,captureId=null,sessionEpoch}={}){
     ready(sessionEpoch);
-    const next=freeze({operationId:identity(operationId),captureId:identity(captureId,true),sessionEpoch:route.sessionEpoch,phase:'ACCEPTED',observationOnly:true});
+    const intentOperationId=identity(operationId),intentCaptureId=identity(captureId,true);
+    const pinned={...route,routeRevision:revision};
+    const key=JSON.stringify([pinned.sessionId,pinned.destination]);
+    if(!captureRoutes.has(key)){
+      if(captureRoutes.size<32)captureRoutes.set(key,freeze(pinned));
+      else routeBudgetExceeded=true;
+    }
+    const next=freeze({operationId:intentOperationId,captureId:intentCaptureId,sessionEpoch:route.sessionEpoch,route:pinned,phase:'ACCEPTED',observationOnly:true});
     active=next;captureHistory=true;
     return active;
   }
@@ -67,12 +77,23 @@ function createTransferContexts({recoveryDestination,newId}={}){
     if(sessionEpoch===undefined)throw failure('TRANSFER_CONTEXT_INVALID','The admitted callback must identify its native session epoch.');
     ready(sessionEpoch);
     if(!Number.isSafeInteger(sequence+1))throw failure('TRANSFER_ID_EXHAUSTED','Transfer identity sequence exhausted.');
-    const recoveryRoute=tainted||!route.destination;
+    // Session ownership is a delivery policy, separate from native capture
+    // correlation. A route change alone must not erase every future session.
+    // Preserve the unique capture-session candidate for delayed files; when
+    // different capture sessions remain possible, retain the candidates rather
+    // than silently assigning the most recently opened session.
+    const candidates=[...captureRoutes.values()];
+    const sessionIds=[...new Set(candidates.map(candidate=>candidate.sessionId))];
+    const ambiguous=routeBudgetExceeded||sessionIds.length>1;
+    const delivery=ambiguous?null:candidates.length?active?.route||candidates.at(-1):route;
+    const recoveryRoute=ambiguous||!delivery?.destination;
+    const sessionAssociation=freeze({status:ambiguous?'AMBIGUOUS':candidates.length?'CAPTURE_ROUTE_CANDIDATE':'ROUTE_AT_ADMISSION',
+      candidateSessionIds:sessionIds,routeBudgetExceeded,routeRevision:delivery?.routeRevision??revision});
     const attribution=tainted||captureHistory?'AMBIGUOUS':'EXTERNAL';
     return freeze({transferId:`${scope}:${++sequence}`,sessionEpoch:route.sessionEpoch,routeRevision:revision,
-      sessionId:recoveryRoute?null:route.sessionId,destination:recoveryRoute?recoveryDestination:route.destination,
+      sessionId:ambiguous?null:delivery?.sessionId??null,destination:recoveryRoute?recoveryDestination:delivery.destination,sessionAssociation,
       operationType:'SDK_TRANSFER',operationId:null,captureId:null,phase:'ADMITTED',attribution,correlation:'UNCONFIRMED',confirmation:'UNVERIFIED',recoveryRoute,
-      reason:tainted?'ROUTE_BOUNDARY_WITHOUT_CORRELATION':!route.destination?'DELIVERY_DESTINATION_MISSING':captureHistory?'CAPTURE_KEY_UNAVAILABLE':'NO_APP_CAPTURE_INTENT',
+      reason:ambiguous?'MULTIPLE_CAPTURE_SESSION_CANDIDATES':!delivery?.destination?'DELIVERY_DESTINATION_MISSING':captureHistory?'CAPTURE_KEY_UNAVAILABLE':'NO_APP_CAPTURE_INTENT',
       activeIntentAtAdmission:active?{...active}:null});
   }
   return {setRoute,noteCapture,settleCapture,admit,snapshot};
