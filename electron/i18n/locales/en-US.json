@@ -1210,6 +1210,7 @@
   "legacy.cameraControl.the_lens_is_in_mf_switch_it_to": "The lens is in MF. Switch it to AF.",
   "legacy.cameraControl.start_autofocus": "Start autofocus",
   "legacy.cameraControl.live_view_stopped_during_autofocus": "Live View stopped during autofocus.",
+  "legacy.cameraControl.focus_not_confirmed": "Focus not confirmed",
   "legacy.cameraControl.the_camera_couldn_t_focus_aim_at_a": "The camera couldn’t focus. Aim at a high-contrast subject and check the lens is in AF.",
   "legacy.cameraControl.the_camera_didn_t_confirm_focus_within_12": "The camera didn’t confirm focus within 12 seconds. Check the lens’s AF switch, lighting and focus area.",
   "legacy.cameraControl.finish_autofocus": "Finish autofocus",

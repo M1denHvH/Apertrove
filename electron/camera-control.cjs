@@ -88,9 +88,9 @@ function createCameraControl(io){
           successes=sample.status==='focused'?successes+1:0;
           failures=sample.status==='failed'?failures+1:0;
           if(successes>=2){confirmedSample=sample;result={status:'focused',confirmed:true,durationMs:now()-start,method:native?'viewfinder':'live'};break;}
-          if(failures>=3&&now()-start>=1800)throw Error('Камера не смогла навести резкость. Выберите контрастный объект и проверьте AF на объективе.');
+          if(failures>=3&&now()-start>=1800){io.log?.('info','Камера не смогла навести резкость. Выберите контрастный объект и проверьте AF на объективе.');throw Error('Фокус не подтверждён');}
         }
-        if(!result)throw Error('За 12 секунд камера не подтвердила фокус. Проверьте AF на объективе, освещение и область фокусировки.');
+        if(!result){io.log?.('info','За 12 секунд камера не подтвердила фокус. Проверьте AF на объективе, освещение и область фокусировки.');throw Error('Фокус не подтверждён');}
       }catch(e){io.onAutofocus?.({status:'failed',message:e.message});throw e;
       }finally{
         try{if(started)io.command(native?COMMANDS.shutter:COMMANDS.autofocus,0,'Завершение команды автофокуса');}

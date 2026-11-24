@@ -121,8 +121,9 @@ test('read-only status keeps every property unwritable despite cached descriptor
 test('control-only capture and card traversal stop before SDK/file effects',async()=>{
   const ports={state:{controlsOnly:true,capabilities:{capture:false,reason:'disabled'}},ensure:()=>{},ensureWorking:()=>{},operationError:fault};
   const context=load(section(worker,'function capture(','\nfunction stopBurst'),ports,['capture']);assert.throws(()=>context.capture({}),/disabled/);
-  const card=load(section(worker,'async function listCard()','\nconst controls='),ports,['listCard']);await assert.rejects(card.listCard(),/отключена/);
-  for(const [name,end] of [['importCard','\n  producerFence:'],['destination',',status:']]){
+  const card=load(section(worker,'function cardEnsure(){','\nconst cardDownloader='),{...ports,captureWait:null,controls:{isBusy:()=>false}},['cardEnsure']);
+  assert.throws(()=>card.cardEnsure(),error=>error.code==='OPERATION_ADMISSION_CLOSED');
+  for(const [name,end] of [['destination',',status:']]){
     const source=section(worker,name+':async',end),context=load('const handler=({'+source+'}).'+name+';',{...ports},['handler']);
     await assert.rejects(context.handler({ids:['synthetic'],folder:'synthetic'},{}),error=>error.code==='OPERATION_ADMISSION_CLOSED');
   }
@@ -138,6 +139,24 @@ test('control-only AF requires live and returns only UNVERIFIED after one bounde
   assert.equal(result.status,'unverified');assert.equal(result.confirmed,false);assert.equal(result.reason,'FOCUS_METADATA_UNQUALIFIED');
   assert.equal(logs.some(row=>row.level==='success'||row.message.includes('резкость подтверждена')),false);
   await control.focus({direction:'near',step:1});await control.focus({direction:'far',step:1});assert.deepEqual(commands.slice(2),[[0x103,1],[0x103,0x8001]]);
+});
+
+test('a returned control-only AF rejection stays a command failure rather than quarantining the session',()=>{
+  const commands=[],events=[],entries=[];let attempt=0;
+  const source=section(worker,'  command:(id,param,action)=>','\n});');
+  const context=load('const command=({'+source+'}).command;',{
+    shutterTrace:()=>{},currentOperation:{operationId:'af-1'},state:{controlsOnly:true},live:true,controlAfStopPending:false,
+    ensure:()=>{},camera:{},get:id=>id===0x500?2:1,
+    observed:(method,phase,fn,kind)=>{const code=fn();entries.push({method,phase,code,kind});if(code!==0&&kind!=='command-result')events.push({event:'nativeObservation',data:{classification:'UNKNOWN'}});return code;},
+    check:code=>{if(code)throw Object.assign(Error('focus not acquired'),{code});},
+    sdk:{command:(_camera,id,param)=>{commands.push([id,param]);return ++attempt===1?0x8d01:0;}},
+  },['command']);
+  assert.throws(()=>context.command(0x102,1,'AF'),error=>error.code===0x8d01);
+  context.command(0x102,0,'AF release');
+  assert.deepEqual(commands,[[0x102,1],[0x102,0]]);
+  assert.ok(entries.every(entry=>entry.kind==='command-result'));
+  assert.equal(events.length,0);
+  assert.equal(context.controlAfStopPending,false);
 });
 
 test('AF always attempts one owed OFF after a possibly dispatched ON exception or stopped live stream',async()=>{

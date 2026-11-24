@@ -1210,6 +1210,7 @@
   "legacy.cameraControl.the_lens_is_in_mf_switch_it_to": "Объектив в MF. Переведите его переключатель в AF.",
   "legacy.cameraControl.start_autofocus": "Запуск автофокуса",
   "legacy.cameraControl.live_view_stopped_during_autofocus": "Live View остановлен во время автофокуса.",
+  "legacy.cameraControl.focus_not_confirmed": "Фокус не подтверждён",
   "legacy.cameraControl.the_camera_couldn_t_focus_aim_at_a": "Камера не смогла навести резкость. Выберите контрастный объект и проверьте AF на объективе.",
   "legacy.cameraControl.the_camera_didn_t_confirm_focus_within_12": "За 12 секунд камера не подтвердила фокус. Проверьте AF на объективе, освещение и область фокусировки.",
   "legacy.cameraControl.finish_autofocus": "Завершение команды автофокуса",

@@ -10,13 +10,17 @@ function createNativeObservations({limit=32}={}){
   if(!Number.isInteger(limit)||limit<1||limit>128)throw TypeError('Observation limit must be 1..128.');
   const entries=[],groups=new Map();let total=0,dropped=0,droppedFailures=0,primary=null,hasFailures=false;
   function append(input,thrown=false){
-    const kind=thrown?'exception':['EdsRetain','EdsRelease'].includes(input.method)||input.kind==='reference-count'?'reference-count':input.kind==='void'?'void':input.kind==='boolean'?'boolean':'error-code';
+    const kind=thrown?'exception':['EdsRetain','EdsRelease'].includes(input.method)||input.kind==='reference-count'?'reference-count':input.kind==='command-result'?'command-result':input.kind==='void'?'void':input.kind==='boolean'?'boolean':'error-code';
     const code=thrown?errorCode(input.error):kind==='boolean'&&typeof input.code==='boolean'?input.code:boundedCode(input.code);
+    // A valid EdsSendCommand result is an operation outcome. Nonzero values
+    // are ordinary camera command rejections (for example AF not acquired),
+    // not evidence that the native lifecycle is unknown. Binding exceptions
+    // still enter through `failure` and remain quarantinable.
     const failure=thrown||kind==='error-code'&&code!==0||kind==='reference-count'&&(code===null||code===0xffffffff)||kind==='boolean'&&code!==true&&code!==1;
     const value={operation:OPERATIONS.has(input.operation)?input.operation:'native',
       operationId:typeof input.operationId==='string'&&/^[A-Za-z0-9_.:-]{1,96}$/.test(input.operationId)?input.operationId:null,
       phase:PHASES.has(input.phase)?input.phase:'unknown',method:METHODS.has(input.method)?input.method:'UNKNOWN_METHOD',
-      kind,code,classification:failure?'UNKNOWN':kind==='reference-count'?'REFERENCE_COUNT':kind==='void'?'OBSERVED':kind==='boolean'?'SOURCE_TRUE':'SOURCE_ZERO',failure};
+      kind,code,classification:failure?'UNKNOWN':kind==='command-result'?'COMMAND_RESULT':kind==='reference-count'?'REFERENCE_COUNT':kind==='void'?'OBSERVED':kind==='boolean'?'SOURCE_TRUE':'SOURCE_ZERO',failure};
     total=Math.min(Number.MAX_SAFE_INTEGER,total+1);hasFailures||=failure;
     const key=JSON.stringify(value);let entry=groups.get(key);
     if(entry)entry.count=Math.min(Number.MAX_SAFE_INTEGER,entry.count+1);

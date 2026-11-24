@@ -702,7 +702,10 @@ const controls=createCameraControl({
       if(id===0x102)controlAfStopPending=param===1;
     }
     shutterTrace('af-dispatch',{operationId:currentOperation?.operationId,command:id,parameter:param,servo:state.servo?.status,worker:'focus'});
-    const result=state.controlsOnly?observed('EdsSendCommand','controls-only-focus',()=>sdk.command(camera,id,param)):sdk.command(camera,id,param);
+    // A numeric EdsSendCommand rejection is the result of this operation, not
+    // proof that the native session became unsafe. Keep it in diagnostics
+    // without promoting a normal AF failure to a lifecycle quarantine.
+    const result=state.controlsOnly?observed('EdsSendCommand','controls-only-focus',()=>sdk.command(camera,id,param),'command-result'):sdk.command(camera,id,param);
     shutterTrace('af-result',{operationId:currentOperation?.operationId,command:id,parameter:param,code:result,servo:state.servo?.status});check(result,action);
   }
 });
